@@ -43,7 +43,7 @@ Add to your `.mcp.json`:
 ### 4. Run the dev server
 
 ```bash
-npm run start   # or: vite
+vite -c vite.config.js
 ```
 
 ## MCP Tools
