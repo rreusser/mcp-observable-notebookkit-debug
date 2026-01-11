@@ -109,8 +109,11 @@ wss.on('connection', (ws) => {
 function handleBrowserMessage(message, ws) {
   const { type, sessionId, data, timestamp, requestId } = message;
 
-  // Handle responses to our requests
-  if (type === 'cell_value_response' || type === 'cells_list_response' || type === 'errors_response') {
+  // Handle responses to our requests (new value-centric responses)
+  if (type === 'value_response' || type === 'values_response' ||
+      type === 'values_list_response' || type === 'metadata_response' ||
+      type === 'cell_value_response' || type === 'cells_list_response' ||
+      type === 'errors_response') {
     const pending = pendingRequests.get(requestId);
     if (pending) {
       clearTimeout(pending.timer);
@@ -121,11 +124,18 @@ function handleBrowserMessage(message, ws) {
   }
 
   // Handle requests from WebSocket clients (for testing/non-MCP access)
-  // Forward to browsers and relay the response back
-  if (type === 'GetCellValue' || type === 'ListCells') {
-    const responseType = type === 'GetCellValue' ? 'cell_value_response' : 'cells_list_response';
+  if (type === 'GetValue' || type === 'GetValues' || type === 'ListValues' ||
+      type === 'GetValueMetadata' || type === 'GetCellValue' || type === 'ListCells') {
+    const responseTypes = {
+      'GetValue': 'value_response',
+      'GetValues': 'values_response',
+      'ListValues': 'values_list_response',
+      'GetValueMetadata': 'metadata_response',
+      'GetCellValue': 'cell_value_response',
+      'ListCells': 'cells_list_response'
+    };
+    const responseType = responseTypes[type];
 
-    // Set up response handler for this request
     const timeout = setTimeout(() => {
       pendingRequests.delete(requestId);
       ws.send(JSON.stringify({
@@ -138,7 +148,6 @@ function handleBrowserMessage(message, ws) {
 
     pendingRequests.set(requestId, {
       resolve: (response) => {
-        // Relay response back to the requesting client
         ws.send(JSON.stringify(response));
       },
       reject: () => {},
@@ -158,10 +167,8 @@ function handleBrowserMessage(message, ws) {
   // Handle session start
   if (type === 'session_start') {
     currentSessionId = sessionId;
-    // Check if session already exists (early logs may have created it)
     const existing = sessions.get(sessionId);
     if (existing) {
-      // Update start time but preserve existing logs
       existing.startTime = timestamp;
       console.error(`[Server] Session started (merged): ${sessionId}`);
     } else {
@@ -247,11 +254,10 @@ function createRequest(type, data, timeout = DEFAULT_TIMEOUT) {
 
     pendingRequests.set(requestId, { resolve, reject, timer });
 
-    // Broadcast to all connected clients (first response wins)
     const message = JSON.stringify({ type, requestId, ...data });
     let sent = false;
     clients.forEach(client => {
-      if (client.readyState === 1) {  // WebSocket.OPEN
+      if (client.readyState === 1) {
         client.send(message);
         sent = true;
       }
@@ -266,17 +272,31 @@ function createRequest(type, data, timeout = DEFAULT_TIMEOUT) {
 }
 
 /**
- * Request cell value from browser
+ * Request a single value from browser
  */
-async function requestCellValue(cellName, timeout = DEFAULT_TIMEOUT) {
-  return createRequest('GetCellValue', { cellName }, timeout);
+async function requestValue(name, timeout = DEFAULT_TIMEOUT) {
+  return createRequest('GetValue', { name }, timeout);
 }
 
 /**
- * Request list of cells from browser
+ * Request multiple/all values from browser
  */
-async function requestCellsList(timeout = DEFAULT_TIMEOUT) {
-  return createRequest('ListCells', {}, timeout);
+async function requestValues(names, timeout = DEFAULT_TIMEOUT) {
+  return createRequest('GetValues', { names }, timeout);
+}
+
+/**
+ * Request list of values from browser
+ */
+async function requestValuesList(timeout = DEFAULT_TIMEOUT) {
+  return createRequest('ListValues', {}, timeout);
+}
+
+/**
+ * Request value metadata from browser
+ */
+async function requestValueMetadata(name, timeout = DEFAULT_TIMEOUT) {
+  return createRequest('GetValueMetadata', { name }, timeout);
 }
 
 /**
@@ -296,7 +316,7 @@ function broadcastRefresh() {
   console.error(`[Server] Broadcasting refresh (new session: ${sessionId})`);
 
   clients.forEach(client => {
-    if (client.readyState === 1) {  // WebSocket.OPEN
+    if (client.readyState === 1) {
       client.send(message);
     }
   });
@@ -322,7 +342,6 @@ async function waitForCompletion(sessionId, timeout) {
     const session = await fetchSession(sessionId);
 
     if (session) {
-      // Check for completion signal in logs
       const completionLog = session.logs?.find(log =>
         log.args?.some(arg =>
           typeof arg === 'string' && arg.includes('[NOTEBOOK_READY]')
@@ -333,7 +352,6 @@ async function waitForCompletion(sessionId, timeout) {
         return { completed: true, duration: Date.now() - startTime, session };
       }
 
-      // Check if session explicitly ended
       if (session.ended) {
         return { completed: true, duration: Date.now() - startTime, session };
       }
@@ -342,15 +360,12 @@ async function waitForCompletion(sessionId, timeout) {
     await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
 
-  // Timeout reached, fetch final session state
   const session = await fetchSession(sessionId);
   return { completed: false, duration: timeout, session };
 }
 
 /**
  * Format session output for display
- * @param {object} session - Session data
- * @param {string} filter - Optional substring filter for logs
  */
 function formatSessionOutput(session, filter) {
   if (!session) {
@@ -359,7 +374,6 @@ function formatSessionOutput(session, filter) {
 
   const output = [];
 
-  // Filter logs if filter provided
   let filteredLogs = session.logs || [];
   if (filter) {
     filteredLogs = filteredLogs.filter(log => {
@@ -373,7 +387,6 @@ function formatSessionOutput(session, filter) {
     });
   }
 
-  // Summary
   output.push(`Session: ${session.id}`);
   const startTime = session.startTime ? new Date(session.startTime).toISOString() : 'unknown';
   output.push(`Started: ${startTime}`);
@@ -386,7 +399,6 @@ function formatSessionOutput(session, filter) {
   output.push(`Errors: ${session.errors?.length || 0}`);
   output.push('');
 
-  // Logs
   if (filteredLogs.length > 0) {
     output.push('=== LOGS ===');
     filteredLogs.forEach(log => {
@@ -404,7 +416,6 @@ function formatSessionOutput(session, filter) {
     output.push('');
   }
 
-  // Errors
   if (session.errors && session.errors.length > 0) {
     output.push('=== ERRORS ===');
     session.errors.forEach(error => {
@@ -427,14 +438,36 @@ function formatSessionOutput(session, filter) {
 }
 
 /**
- * Format cell value for display
+ * Format a value response with state information
  */
-function formatCellValue(value) {
-  if (value === null) return 'null';
-  if (value === undefined || value.__type === 'undefined') return 'undefined';
+function formatValueResponse(response) {
+  const { name, state, value, error, stack } = response;
 
-  // Handle special types
-  if (value.__type) {
+  const output = [`Value: ${name}`, `State: ${state}`];
+
+  if (state === 'fulfilled') {
+    output.push('');
+    output.push(formatValue(value));
+  } else if (state === 'rejected') {
+    output.push(`Error: ${error}`);
+    if (stack) {
+      output.push(`Stack: ${stack.split('\n').slice(0, 3).join('\n  ')}`);
+    }
+  } else if (state === 'pending') {
+    output.push('(Value is still computing)');
+  }
+
+  return output.join('\n');
+}
+
+/**
+ * Format a serialized value for display
+ */
+function formatValue(value) {
+  if (value === null) return 'null';
+  if (value === undefined || value?.__type === 'undefined') return 'undefined';
+
+  if (value?.__type) {
     switch (value.__type) {
       case 'Function':
         return `Function: ${value.name}\n${value.source}`;
@@ -463,15 +496,15 @@ function formatCellValue(value) {
         return `[Circular: ${value.ref}]`;
       case 'MaxDepthExceeded':
         return '[Max depth exceeded]';
+      case 'string':
+        return value.truncated ? `"${value.value}" (truncated, ${value.length} chars total)` : value.value;
     }
   }
 
-  // Handle arrays
   if (Array.isArray(value)) {
     return JSON.stringify(value, null, 2);
   }
 
-  // Handle objects
   if (typeof value === 'object') {
     const str = JSON.stringify(value, null, 2);
     if (str.length > 5000) {
@@ -480,15 +513,42 @@ function formatCellValue(value) {
     return str;
   }
 
-  // Primitives
   return String(value);
+}
+
+/**
+ * Format metadata for display
+ */
+function formatMetadata(metadata) {
+  const output = [
+    `Name: ${metadata.name}`,
+    `State: ${metadata.state}`,
+  ];
+
+  if (metadata.valueType) {
+    output.push(`Type: ${metadata.valueType}`);
+  }
+
+  if (metadata.inputs && metadata.inputs.length > 0) {
+    output.push(`Dependencies: ${metadata.inputs.join(', ')}`);
+  }
+
+  if (metadata.outputs && metadata.outputs.length > 0) {
+    output.push(`Dependents: ${metadata.outputs.join(', ')}`);
+  }
+
+  if (metadata.error) {
+    output.push(`Error: ${metadata.error}`);
+  }
+
+  return output.join('\n');
 }
 
 // Create MCP server
 const server = new Server(
   {
     name: 'debug-notebook',
-    version: '2.0.0',
+    version: '3.0.0',
   },
   {
     capabilities: {
@@ -502,14 +562,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: 'RefreshNotebook',
+        name: 'Refresh',
         description: 'Trigger notebook page refresh and wait for completion. Captures all logs and errors from the new session.',
         inputSchema: {
           type: 'object',
           properties: {
             wait_for_completion: {
               type: 'boolean',
-              description: 'Wait for [NOTEBOOK_READY] signal or session_end (recommended)',
+              description: 'Wait for session_end signal (recommended)',
               default: true
             },
             timeout_ms: {
@@ -521,27 +581,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'GetCellValue',
-        description: 'Get the current value of a specific cell from the running notebook',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            cell_name: {
-              type: 'string',
-              description: 'Name of the cell to retrieve'
-            },
-            timeout_ms: {
-              type: 'number',
-              description: 'Maximum time to wait in milliseconds',
-              default: DEFAULT_TIMEOUT
-            }
-          },
-          required: ['cell_name']
-        }
-      },
-      {
-        name: 'ListCells',
-        description: 'Get list of all defined cells in the running notebook',
+        name: 'ListValues',
+        description: 'Get list of all named values in the running notebook',
         inputSchema: {
           type: 'object',
           properties: {
@@ -554,7 +595,64 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'GetSessionLogs',
+        name: 'GetValue',
+        description: 'Get a specific value from the running notebook. Returns the value along with its state (fulfilled, pending, or rejected).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Name of the value to retrieve'
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait for the value to resolve',
+              default: DEFAULT_TIMEOUT
+            }
+          },
+          required: ['name']
+        }
+      },
+      {
+        name: 'GetValues',
+        description: 'Get multiple values from the notebook at once. If no names provided, returns all values. Useful for getting a snapshot of the entire notebook state.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            names: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Names of values to retrieve (omit for all values)'
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait per value',
+              default: 100
+            }
+          }
+        }
+      },
+      {
+        name: 'GetValueMetadata',
+        description: 'Get metadata about a value including its state, type, dependencies (inputs), and dependents (outputs) without fetching the full value.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Name of the value'
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          },
+          required: ['name']
+        }
+      },
+      {
+        name: 'GetLogs',
         description: 'Get logs from the current or most recent session without triggering a refresh',
         inputSchema: {
           type: 'object',
@@ -565,14 +663,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             filter: {
               type: 'string',
-              description: 'Filter logs by substring match (e.g., "[DebugClient]" to show only debug client logs)'
+              description: 'Filter logs by substring match'
             }
           }
         }
       },
       {
         name: 'GetErrors',
-        description: 'Get all runtime errors from cells in the notebook. Checks each cell and returns errors with cell name, message, and stack trace.',
+        description: 'Get all errors from the notebook. Includes both DOM-reported errors and values in rejected state.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -585,14 +683,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'CaptureCellImage',
-        description: 'Capture a canvas or image cell and save it to a temp file. Returns the file path so Claude can read and visually inspect it.',
+        name: 'CaptureImage',
+        description: 'Capture a canvas value and save it to a temp file. Returns the file path so it can be viewed.',
         inputSchema: {
           type: 'object',
           properties: {
-            cell_name: {
+            name: {
               type: 'string',
-              description: 'Name of the cell containing a canvas or image'
+              description: 'Name of the value containing a canvas'
             },
             timeout_ms: {
               type: 'number',
@@ -600,7 +698,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               default: DEFAULT_TIMEOUT
             }
           },
-          required: ['cell_name']
+          required: ['name']
         }
       }
     ]
@@ -612,30 +710,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
-    if (name === 'RefreshNotebook') {
+    if (name === 'Refresh') {
       const waitForSignal = args?.wait_for_completion !== false;
       const timeout = args?.timeout_ms || (waitForSignal ? COMPLETION_TIMEOUT : 5000);
 
-      // Broadcast refresh
       const sessionId = broadcastRefresh();
-
-      // Wait for completion
       const result = await waitForCompletion(sessionId, timeout);
 
-      // Format minimal response (logs available via GetSessionLogs)
       const session = result.session;
       const errorCount = session?.errors?.length || 0;
       const logCount = session?.logs?.length || 0;
 
       const statusText = result.completed
-        ? `✓ Notebook refreshed in ${result.duration}ms`
-        : `⏱ Timeout after ${result.duration}ms`;
+        ? `Notebook refreshed in ${result.duration}ms`
+        : `Timeout after ${result.duration}ms`;
 
       const output = [statusText];
 
       if (errorCount > 0) {
         output.push(`Errors: ${errorCount}`);
-        // Include error details since they're important
         session.errors.forEach(error => {
           output.push(`  - ${error.message}${error.cellId ? ` (cell: ${error.cellId})` : ''}`);
         });
@@ -643,7 +736,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         output.push('No errors');
       }
 
-      output.push(`Logs: ${logCount} (use GetSessionLogs to view)`);
+      output.push(`Logs: ${logCount} (use GetLogs to view)`);
 
       return {
         content: [{
@@ -653,37 +746,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'GetCellValue') {
-      const { cell_name, timeout_ms = DEFAULT_TIMEOUT } = args;
-
-      if (!cell_name) {
-        return {
-          content: [{ type: 'text', text: 'Error: cell_name is required' }],
-          isError: true
-        };
-      }
-
-      const response = await requestCellValue(cell_name, timeout_ms);
-
-      if (!response.success) {
-        return {
-          content: [{ type: 'text', text: `Error: ${response.error}` }],
-          isError: true
-        };
-      }
-
-      return {
-        content: [{
-          type: 'text',
-          text: `Cell: ${cell_name}\n\n${formatCellValue(response.value)}`
-        }]
-      };
-    }
-
-    if (name === 'ListCells') {
+    if (name === 'ListValues') {
       const { timeout_ms = DEFAULT_TIMEOUT } = args || {};
 
-      const response = await requestCellsList(timeout_ms);
+      const response = await requestValuesList(timeout_ms);
 
       if (!response.success) {
         return {
@@ -692,16 +758,110 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const cellList = response.cells.join('\n- ');
+      const valueList = response.values.join('\n- ');
       return {
         content: [{
           type: 'text',
-          text: `Available cells (${response.cells.length}):\n\n- ${cellList}`
+          text: `Available values (${response.values.length}):\n\n- ${valueList}`
         }]
       };
     }
 
-    if (name === 'GetSessionLogs') {
+    if (name === 'GetValue') {
+      const { name: valueName, timeout_ms = DEFAULT_TIMEOUT } = args;
+
+      if (!valueName) {
+        return {
+          content: [{ type: 'text', text: 'Error: name is required' }],
+          isError: true
+        };
+      }
+
+      const response = await requestValue(valueName, timeout_ms);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: formatValueResponse(response)
+        }]
+      };
+    }
+
+    if (name === 'GetValues') {
+      const { names, timeout_ms = 100 } = args || {};
+
+      const response = await requestValues(names, timeout_ms);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      const entries = Object.entries(response.values);
+      const output = [`Values (${entries.length}):\n`];
+
+      for (const [name, data] of entries) {
+        output.push(`## ${name}`);
+        output.push(`State: ${data.state}`);
+        if (data.state === 'fulfilled') {
+          const formatted = formatValue(data.value);
+          // Truncate long values in bulk output
+          if (formatted.length > 200) {
+            output.push(formatted.slice(0, 200) + '...');
+          } else {
+            output.push(formatted);
+          }
+        } else if (data.state === 'rejected') {
+          output.push(`Error: ${data.error}`);
+        }
+        output.push('');
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: output.join('\n')
+        }]
+      };
+    }
+
+    if (name === 'GetValueMetadata') {
+      const { name: valueName, timeout_ms = DEFAULT_TIMEOUT } = args;
+
+      if (!valueName) {
+        return {
+          content: [{ type: 'text', text: 'Error: name is required' }],
+          isError: true
+        };
+      }
+
+      const response = await requestValueMetadata(valueName, timeout_ms);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: formatMetadata(response.metadata)
+        }]
+      };
+    }
+
+    if (name === 'GetLogs') {
       const { session_id, filter } = args || {};
 
       const sessionId = session_id || currentSessionId;
@@ -741,15 +901,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: 'text',
-            text: 'No errors found in notebook cells.'
+            text: 'No errors found in notebook.'
           }]
         };
       }
 
       const errorList = response.errors.map(e => {
-        let msg = `Cell: ${e.cell}\nError: ${e.error}`;
+        const name = e.name || e.cell;
+        let msg = `Value: ${name}\nError: ${e.error}`;
         if (e.stack) {
-          // Show first few lines of stack
           const stackLines = e.stack.split('\n').slice(0, 4).join('\n');
           msg += `\nStack:\n${stackLines}`;
         }
@@ -764,17 +924,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'CaptureCellImage') {
-      const { cell_name, timeout_ms = DEFAULT_TIMEOUT } = args;
+    if (name === 'CaptureImage') {
+      const { name: valueName, timeout_ms = DEFAULT_TIMEOUT } = args;
 
-      if (!cell_name) {
+      if (!valueName) {
         return {
-          content: [{ type: 'text', text: 'Error: cell_name is required' }],
+          content: [{ type: 'text', text: 'Error: name is required' }],
           isError: true
         };
       }
 
-      const response = await requestCellValue(cell_name, timeout_ms);
+      const response = await requestValue(valueName, timeout_ms);
 
       if (!response.success) {
         return {
@@ -783,21 +943,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      if (response.state === 'rejected') {
+        return {
+          content: [{ type: 'text', text: `Error: Value is in rejected state: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      if (response.state === 'pending') {
+        return {
+          content: [{ type: 'text', text: `Error: Value is still pending` }],
+          isError: true
+        };
+      }
+
       const value = response.value;
 
       // Check if it's a canvas with base64 data
       if (value?.__type === 'Canvas' && value.data) {
-        const filename = `notebook-capture-${cell_name}-${Date.now()}.png`;
+        const filename = `notebook-capture-${valueName}-${Date.now()}.png`;
         const filepath = join(tmpdir(), filename);
 
-        // Decode base64 and write to file
         const buffer = Buffer.from(value.data, 'base64');
         await writeFile(filepath, buffer);
 
         return {
           content: [{
             type: 'text',
-            text: `Captured canvas "${cell_name}" (${value.width}x${value.height}) to:\n${filepath}\n\nUse the Read tool to view the image.`
+            text: `Captured canvas "${valueName}" (${value.width}x${value.height}) to:\n${filepath}\n\nUse the Read tool to view the image.`
           }]
         };
       }
@@ -807,7 +980,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return {
           content: [{
             type: 'text',
-            text: `Cell "${cell_name}" is an <img> element. Image capture for <img> tags is not yet supported.`
+            text: `Value "${valueName}" is an <img> element. Image capture for <img> tags is not yet supported.`
           }],
           isError: true
         };
@@ -816,7 +989,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: 'text',
-          text: `Cell "${cell_name}" is not a canvas. Type: ${value?.__type || typeof value}`
+          text: `Value "${valueName}" is not a canvas. Type: ${value?.__type || typeof value}`
         }],
         isError: true
       };
@@ -837,15 +1010,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start servers
 async function main() {
-  // Start HTTP server
   httpServer.listen(HTTP_PORT, () => {
     console.error(`[Server] HTTP server running on http://localhost:${HTTP_PORT}`);
   });
 
-  // WebSocket server already started above
   console.error(`[Server] WebSocket server running on ws://localhost:${WS_PORT}`);
 
-  // Start MCP server
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('Debug Notebook MCP server running on stdio');

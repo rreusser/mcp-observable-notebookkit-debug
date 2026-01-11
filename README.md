@@ -2,7 +2,7 @@
 
 > MCP server for debugging [Observable Notebook Kit](https://github.com/observablehq/notebook-kit) notebooks.
 
-Enables AI assistants to inspect cell values, view errors, and capture canvas output from notebooks running in a web browser. For a fully working example, see [./example](./example). This isn't yet published to NPM, so you'll need to install from GitHub, as I'm still trying kicking the tires and seeing how I feel about it.
+Enables AI assistants to inspect values, view errors, and capture canvas output from notebooks running in a web browser. For a fully working example, see [./example](./example). This isn't yet published to NPM, so you'll need to install from GitHub, as I'm still trying kicking the tires and seeing how I feel about it.
 
 ## Why?
 
@@ -54,18 +54,30 @@ Add to your `.mcp.json`:
 
 ### 5. Go!
 
-You can now use an agent like Claude Code to poke and prod at notebooks running in a web browser, inspecting cell outputs and even image outputs.
+You can now use an agent like Claude Code to poke and prod at notebooks running in a web browser, inspecting values and even capturing canvas output as images.
 
 ## MCP Tools
 
-| Tool               | Description                                             |
-| ------------------ | ------------------------------------------------------- |
-| `RefreshNotebook`  | Refresh the page and wait for notebook initialization   |
-| `ListCells`        | List all defined cells in the notebook                  |
-| `GetCellValue`     | Get the current value of a specific cell                |
-| `GetErrors`        | Get all runtime errors from notebook cells              |
-| `GetSessionLogs`   | View console logs from the current session              |
-| `CaptureCellImage` | Save a canvas cell to a temp file for visual inspection |
+| Tool               | Description                                                                 |
+| ------------------ | --------------------------------------------------------------------------- |
+| `Refresh`          | Refresh the page and wait for notebook initialization                       |
+| `ListValues`       | List all named values in the notebook                                       |
+| `GetValue`         | Get a specific value with its state (fulfilled, pending, or rejected)       |
+| `GetValues`        | Get multiple/all values at once (snapshot of notebook state)                |
+| `GetValueMetadata` | Get metadata: state, type, dependencies, and dependents without full value  |
+| `GetErrors`        | Get all errors (DOM-reported and values in rejected state)                  |
+| `GetLogs`          | View console logs from the current session                                  |
+| `CaptureImage`     | Save a canvas value to a temp file for visual inspection                    |
+
+### Value States
+
+Values in an Observable notebook can be in one of three states:
+
+- **fulfilled**: The value has been computed successfully
+- **pending**: The value is still being computed (e.g., async/Promise)
+- **rejected**: The computation threw an error
+
+The `GetValue` and `GetValues` tools return state information along with the value or error.
 
 ## License
 

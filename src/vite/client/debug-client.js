@@ -1,7 +1,7 @@
 (function () {
   if (
     window.location.hostname !== "localhost" &&
-    !window.location.hostname.match(/127\\.0\\.0\\.1/)
+    !window.location.hostname.match(/127\.0\.0\.1/)
   )
     return;
 
@@ -121,13 +121,35 @@
         return;
       }
 
+      // Value-centric handlers (new)
+      if (message.type === "GetValue") {
+        this.handleGetValueRequest(message);
+        return;
+      }
+
+      if (message.type === "GetValues") {
+        this.handleGetValuesRequest(message);
+        return;
+      }
+
+      if (message.type === "ListValues") {
+        this.handleListValuesRequest(message);
+        return;
+      }
+
+      if (message.type === "GetValueMetadata") {
+        this.handleGetValueMetadataRequest(message);
+        return;
+      }
+
+      // Legacy handlers (for backwards compatibility during transition)
       if (message.type === "GetCellValue") {
-        this.handleCellValueRequest(message);
+        this.handleGetValueRequest({ ...message, name: message.cellName });
         return;
       }
 
       if (message.type === "ListCells") {
-        this.handleListCellsRequest(message);
+        this.handleListValuesRequest(message);
         return;
       }
 
@@ -151,46 +173,133 @@
       return null;
     }
 
-    async handleCellValueRequest(message) {
+    /**
+     * Get the Variable object from the runtime scope
+     */
+    getVariable(runtime, name) {
+      return runtime._scope?.get(name) || null;
+    }
+
+    /**
+     * Determine the state of a variable: pending, fulfilled, or rejected
+     * Returns { state, value?, error? }
+     */
+    async getValueState(runtime, name, timeout = 100) {
+      const variable = this.getVariable(runtime, name);
+
+      if (!variable) {
+        return { state: "rejected", error: `${name} is not defined` };
+      }
+
+      try {
+        // Race between getting the value and a short timeout
+        const value = await Promise.race([
+          runtime.value(name),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("__pending__")), timeout)
+          ),
+        ]);
+        return { state: "fulfilled", value };
+      } catch (err) {
+        if (err.message === "__pending__") {
+          return { state: "pending" };
+        }
+        return { state: "rejected", error: err.message, stack: err.stack };
+      }
+    }
+
+    /**
+     * Get metadata about a variable without fetching its full value
+     */
+    getVariableMetadata(runtime, name) {
+      const variable = this.getVariable(runtime, name);
+
+      if (!variable) {
+        return null;
+      }
+
+      // Get dependency names (inputs)
+      const inputs = variable._inputs
+        ? variable._inputs
+            .map((v) => v._name)
+            .filter((n) => n && !n.startsWith("_"))
+        : [];
+
+      // Get dependent names (outputs)
+      const outputs = variable._outputs
+        ? Array.from(variable._outputs)
+            .map((v) => v._name)
+            .filter((n) => n && !n.startsWith("_"))
+        : [];
+
+      return {
+        name,
+        inputs,
+        outputs,
+        type: variable._type, // 1=normal, 2=implicit, 3=duplicate
+        hasValue: variable._value !== undefined,
+      };
+    }
+
+    /**
+     * Handle GetValue request - returns value with state info
+     */
+    async handleGetValueRequest(message) {
       const runtime = this.getRuntimeModule();
+      const name = message.name || message.cellName;
 
       if (!runtime) {
         this.send({
-          type: "cell_value_response",
+          type: "value_response",
           requestId: message.requestId,
-          cellName: message.cellName,
+          name,
           success: false,
           error: "Observable runtime not found",
         });
         return;
       }
 
-      try {
-        const value = await runtime.value(message.cellName);
+      const result = await this.getValueState(runtime, name, message.timeout || 5000);
+
+      if (result.state === "fulfilled") {
         this.send({
-          type: "cell_value_response",
+          type: "value_response",
           requestId: message.requestId,
-          cellName: message.cellName,
+          name,
           success: true,
-          value: this.serializeValue(value),
+          state: "fulfilled",
+          value: this.serializeValue(result.value),
         });
-      } catch (err) {
+      } else if (result.state === "pending") {
         this.send({
-          type: "cell_value_response",
+          type: "value_response",
           requestId: message.requestId,
-          cellName: message.cellName,
-          success: false,
-          error: err.message,
+          name,
+          success: true,
+          state: "pending",
+        });
+      } else {
+        this.send({
+          type: "value_response",
+          requestId: message.requestId,
+          name,
+          success: true,
+          state: "rejected",
+          error: result.error,
+          stack: result.stack,
         });
       }
     }
 
-    handleListCellsRequest(message) {
+    /**
+     * Handle GetValues request - returns multiple/all values
+     */
+    async handleGetValuesRequest(message) {
       const runtime = this.getRuntimeModule();
 
       if (!runtime || !runtime._scope) {
         this.send({
-          type: "cells_list_response",
+          type: "values_response",
           requestId: message.requestId,
           success: false,
           error: "Observable runtime not found",
@@ -198,16 +307,157 @@
         return;
       }
 
-      const cells = Array.from(runtime._scope.keys())
+      // Get list of names to fetch
+      let names = message.names;
+      if (!names || names.length === 0) {
+        // Fetch all values
+        names = Array.from(runtime._scope.keys()).filter(
+          (name) => !name.startsWith("_")
+        );
+      }
+
+      const values = {};
+      const timeout = message.timeout || 100; // Short timeout for bulk operations
+
+      for (const name of names) {
+        const result = await this.getValueState(runtime, name, timeout);
+
+        if (result.state === "fulfilled") {
+          values[name] = {
+            state: "fulfilled",
+            value: this.serializeValue(result.value),
+          };
+        } else if (result.state === "pending") {
+          values[name] = { state: "pending" };
+        } else {
+          values[name] = {
+            state: "rejected",
+            error: result.error,
+          };
+        }
+      }
+
+      this.send({
+        type: "values_response",
+        requestId: message.requestId,
+        success: true,
+        values,
+      });
+    }
+
+    /**
+     * Handle ListValues request - returns list of all value names
+     */
+    handleListValuesRequest(message) {
+      const runtime = this.getRuntimeModule();
+
+      if (!runtime || !runtime._scope) {
+        this.send({
+          type: "values_list_response",
+          requestId: message.requestId,
+          success: false,
+          error: "Observable runtime not found",
+        });
+        return;
+      }
+
+      const values = Array.from(runtime._scope.keys())
         .filter((name) => !name.startsWith("_"))
         .sort();
 
       this.send({
-        type: "cells_list_response",
+        type: "values_list_response",
         requestId: message.requestId,
         success: true,
-        cells,
+        values,
+        // Also send as 'cells' for backwards compatibility
+        cells: values,
       });
+    }
+
+    /**
+     * Handle GetValueMetadata request - returns type/state/dependencies
+     */
+    async handleGetValueMetadataRequest(message) {
+      const runtime = this.getRuntimeModule();
+      const name = message.name;
+
+      if (!runtime || !runtime._scope) {
+        this.send({
+          type: "metadata_response",
+          requestId: message.requestId,
+          name,
+          success: false,
+          error: "Observable runtime not found",
+        });
+        return;
+      }
+
+      const metadata = this.getVariableMetadata(runtime, name);
+
+      if (!metadata) {
+        this.send({
+          type: "metadata_response",
+          requestId: message.requestId,
+          name,
+          success: false,
+          error: `${name} is not defined`,
+        });
+        return;
+      }
+
+      // Get state without waiting long for pending values
+      const stateResult = await this.getValueState(runtime, name, 50);
+
+      // Get value type hint without full serialization
+      let valueType = null;
+      if (stateResult.state === "fulfilled" && stateResult.value !== undefined) {
+        valueType = this.getValueTypeHint(stateResult.value);
+      }
+
+      this.send({
+        type: "metadata_response",
+        requestId: message.requestId,
+        name,
+        success: true,
+        metadata: {
+          ...metadata,
+          state: stateResult.state,
+          valueType,
+          error: stateResult.error,
+        },
+      });
+    }
+
+    /**
+     * Get a type hint for a value without full serialization
+     */
+    getValueTypeHint(value) {
+      if (value === null) return "null";
+      if (value === undefined) return "undefined";
+
+      const type = typeof value;
+      if (type !== "object") return type;
+
+      if (Array.isArray(value)) return `Array(${value.length})`;
+      if (value instanceof Date) return "Date";
+      if (value instanceof RegExp) return "RegExp";
+      if (value instanceof Map) return `Map(${value.size})`;
+      if (value instanceof Set) return `Set(${value.size})`;
+      if (value instanceof Error) return `Error: ${value.name}`;
+      if (value instanceof HTMLCanvasElement)
+        return `Canvas(${value.width}x${value.height})`;
+      if (value instanceof Element) return `Element: <${value.tagName.toLowerCase()}>`;
+      if (ArrayBuffer.isView(value))
+        return `${value.constructor.name}(${value.length})`;
+
+      const proto = Object.getPrototypeOf(value);
+      if (proto && proto.constructor && proto.constructor.name !== "Object") {
+        return proto.constructor.name;
+      }
+
+      const keys = Object.keys(value);
+      return `Object(${keys.length} keys)`;
     }
 
     async handleGetErrorsRequest(message) {
@@ -244,28 +494,21 @@
 
       const runtime = this.getRuntimeModule();
       if (runtime && runtime._scope) {
-        const cells = Array.from(runtime._scope.keys()).filter(
+        const names = Array.from(runtime._scope.keys()).filter(
           (name) => !name.startsWith("_")
         );
 
-        for (const cellName of cells) {
-          try {
-            await Promise.race([
-              runtime.value(cellName),
-              new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("timeout")), 100)
-              ),
-            ]);
-          } catch (err) {
-            if (err.message !== "timeout") {
-              if (!errors.some((e) => e.cell === cellName)) {
-                errors.push({
-                  cell: cellName,
-                  error: err.message,
-                  stack: err.stack,
-                  source: "runtime",
-                });
-              }
+        for (const name of names) {
+          const result = await this.getValueState(runtime, name, 100);
+          if (result.state === "rejected") {
+            if (!errors.some((e) => e.cell === name)) {
+              errors.push({
+                cell: name,
+                name: name,
+                error: result.error,
+                stack: result.stack,
+                source: "runtime",
+              });
             }
           }
         }
