@@ -58,16 +58,40 @@ You can now use an agent like Claude Code to poke and prod at notebooks running 
 
 ## MCP Tools
 
-| Tool               | Description                                                                 |
-| ------------------ | --------------------------------------------------------------------------- |
-| `Refresh`          | Refresh the page and wait for notebook initialization                       |
-| `ListValues`       | List all named values in the notebook                                       |
-| `GetValue`         | Get a specific value with its state (fulfilled, pending, or rejected)       |
-| `GetValues`        | Get multiple/all values at once (snapshot of notebook state)                |
-| `GetValueMetadata` | Get metadata: state, type, dependencies, and dependents without full value  |
-| `GetErrors`        | Get all errors (DOM-reported and values in rejected state)                  |
-| `GetLogs`          | View console logs from the current session                                  |
-| `CaptureImage`     | Save a canvas value to a temp file for visual inspection                    |
+| Tool                 | Description                                                                 |
+| -------------------- | --------------------------------------------------------------------------- |
+| `ListNotebooks`      | List all connected notebooks (use when multiple notebooks are open)         |
+| `Refresh`            | Refresh the page and wait for notebook initialization                       |
+| `ListValues`         | List all named values in the notebook                                       |
+| `GetValue`           | Get a specific value with its state; returns images for Canvas/SVG elements |
+| `GetValues`          | Get multiple/all values at once (snapshot of notebook state)                |
+| `GetValueMetadata`   | Get metadata: state, type, dependencies, and dependents without full value  |
+| `GetErrors`          | Get all errors (DOM-reported and values in rejected state)                  |
+| `GetLogs`            | View console logs from the current session                                  |
+| `SetInput`           | Set an input value (viewof cell) to trigger reactive updates                |
+| `GetElementContent`  | Get content from a DOM element by CSS selector; captures canvas/SVG as images |
+| `GetDependencyGraph` | Get the dependency graph showing how values depend on each other            |
+
+### Multi-Notebook Support
+
+When multiple notebooks are open in different browser tabs, you can target a specific notebook using the `notebook` parameter on any tool:
+
+```
+# By path (without .html extension)
+notebook: "index"
+notebook: "second-notebook"
+
+# By index
+notebook: "0"
+notebook: "1"
+
+# By URL
+notebook: "http://localhost:5173/"
+```
+
+If multiple notebooks are connected and you don't specify which one, the tool will return an error listing the available notebooks.
+
+Use `ListNotebooks` to see all connected notebooks with their URLs and indices.
 
 ### Value States
 
@@ -78,6 +102,14 @@ Values in an Observable notebook can be in one of three states:
 - **rejected**: The computation threw an error
 
 The `GetValue` and `GetValues` tools return state information along with the value or error.
+
+### Image Support
+
+`GetValue` automatically returns images inline for:
+- **Canvas elements**: Captured as PNG
+- **SVG elements**: Rendered to canvas and captured as PNG
+
+No need to save to files - images are returned directly in the MCP response.
 
 ## License
 
