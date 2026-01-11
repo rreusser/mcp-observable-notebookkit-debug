@@ -4,6 +4,10 @@
 
 Enables AI assistants to inspect cell values, view errors, and capture canvas output from notebooks running in a web browser. For a fully working example, see [./example](./example). This isn't yet published to NPM, so you'll need to install from GitHub, as I'm still trying kicking the tires and seeing how I feel about it.
 
+## Why?
+
+The [Observable Desktop](https://observablehq.com/notebook-kit/desktop) is really cool, but it had some limitations. For one, okay, so I paid Anthropic some money for Claude Code, but it's not the *right* Anthropic integration to be able to configure an API key in the app, so I'm out of luck. And I was trying to get some WebGPU experiments running, but the app didn't have access to a WebGPU context. So one thing led to another, and I wrote a quick MCP server to exfiltrate values from notebooks running in the browser.
+
 ## Setup
 
 ### 1. Install the package
