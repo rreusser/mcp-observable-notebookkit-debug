@@ -1,12 +1,12 @@
 # mcp-observable-notebookkit-debug
 
-MCP server for debugging [Observable Notebook Kit](https://github.com/observablehq/notebook-kit) notebooks. Enables AI assistants to inspect cell values, view errors, and capture canvas output from notebooks running in a web browser.
+> MCP server for debugging [Observable Notebook Kit](https://github.com/observablehq/notebook-kit) notebooks.
 
-For a fully working example, see [./example](./example).
+Enables AI assistants to inspect cell values, view errors, and capture canvas output from notebooks running in a web browser. For a fully working example, see [./example](./example). This isn't yet published to NPM, so you'll need to install from GitHub, as I'm still trying kicking the tires and seeing how I feel about it.
 
 ## Setup
 
-### 1. Install the package (not yet published to npm, you'll need to install from github for now.)
+### 1. Install the package
 
 ```bash
 npm install @rreusser/mcp-observable-notebookkit-debug
@@ -27,7 +27,13 @@ export default defineConfig({
 });
 ```
 
-### 3. Configure the MCP server
+### 3. Run the dev server
+
+```bash
+vite -c vite.config.js
+```
+
+### 4. Configure the MCP server
 
 Add to your `.mcp.json`:
 
@@ -42,11 +48,9 @@ Add to your `.mcp.json`:
 }
 ```
 
-### 4. Run the dev server
+### 5. Go!
 
-```bash
-vite -c vite.config.js
-```
+You can now use an agent like Claude Code to poke and prod at notebooks running in a web browser, inspecting cell outputs and even image outputs.
 
 ## MCP Tools
 
