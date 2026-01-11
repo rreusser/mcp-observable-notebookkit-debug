@@ -8,6 +8,7 @@
   // Get port from injected config, fallback to default
   const config = window.__NOTEBOOKKIT_DEBUG_CONFIG__ || { ws: 9899 };
   const DEBUG_WS_URL = `ws://localhost:${config.ws}`;
+  console.log("[DebugClient] Config:", window.__NOTEBOOKKIT_DEBUG_CONFIG__, "-> Using port", config.ws);
   const RECONNECT_INTERVAL = 2000;
   const ERROR_CHECK_INTERVAL = 500;
   const SESSION_TIMEOUT = 5000;
@@ -86,6 +87,7 @@
 
         this.ws.onopen = () => {
           this.connected = true;
+          console.log("[DebugClient] Connected to MCP server at", DEBUG_WS_URL);
 
           while (this.messageQueue.length > 0) {
             const msg = this.messageQueue.shift();
@@ -95,6 +97,7 @@
 
         this.ws.onclose = () => {
           this.connected = false;
+          console.log("[DebugClient] Disconnected from MCP server, reconnecting in", RECONNECT_INTERVAL, "ms");
           setTimeout(() => this.connect(), RECONNECT_INTERVAL);
         };
 
