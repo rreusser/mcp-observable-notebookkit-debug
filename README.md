@@ -1,6 +1,6 @@
 # mcp-observable-notebookkit-debug
 
-MCP server for debugging [Observable Notebook Kit](https://github.com/observablehq/notebook-kit) notebooks. Enables AI assistants to inspect cell values, view errors, and capture canvas output from running notebooks.
+MCP server for debugging [Observable Notebook Kit](https://github.com/observablehq/notebook-kit) notebooks. Enables AI assistants to inspect cell values, view errors, and capture canvas output from notebooks running in a web browser.
 
 ## Setup
 
@@ -15,16 +15,13 @@ npm install @rreusser/mcp-observable-notebookkit-debug
 In your `vite.config.js`:
 
 ```js
-import { observable, config } from "@observablehq/notebook-kit/vite";
 import { defineConfig } from "vite";
+import { observable, config } from "@observablehq/notebook-kit/vite";
 import { debugNotebook } from "@rreusser/mcp-observable-notebookkit-debug";
 
 export default defineConfig({
   ...config(),
-  plugins: [
-    debugNotebook(),
-    observable(),
-  ]
+  plugins: [debugNotebook(), observable()],
 });
 ```
 
@@ -51,11 +48,11 @@ npm run start   # or: vite
 
 ## MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `RefreshNotebook` | Refresh the page and wait for notebook initialization |
-| `ListCells` | List all defined cells in the notebook |
-| `GetCellValue` | Get the current value of a specific cell |
-| `GetErrors` | Get all runtime errors from notebook cells |
-| `GetSessionLogs` | View console logs from the current session |
+| Tool               | Description                                             |
+| ------------------ | ------------------------------------------------------- |
+| `RefreshNotebook`  | Refresh the page and wait for notebook initialization   |
+| `ListCells`        | List all defined cells in the notebook                  |
+| `GetCellValue`     | Get the current value of a specific cell                |
+| `GetErrors`        | Get all runtime errors from notebook cells              |
+| `GetSessionLogs`   | View console logs from the current session              |
 | `CaptureCellImage` | Save a canvas cell to a temp file for visual inspection |
