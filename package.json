@@ -1,11 +1,11 @@
 {
-  "name": "@rreusser/mcp-observable-notebookkit-debugger",
-  "version": "1.0.0",
+  "name": "@rreusser/mcp-observable-notebookkit-debug",
+  "version": "0.0.0",
   "type": "module",
   "description": "MCP server for debugging Observable Notebook Kit notebooks",
-  "main": "vite-plugin.js",
+  "main": "src/vite/plugin.js",
   "bin": {
-    "mcp-observable-debug": "./index.js"
+    "mcp-notebookkit-debug": "./bin/mcp-notebookkit-debug.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.6.0",

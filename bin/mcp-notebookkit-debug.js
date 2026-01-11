@@ -122,8 +122,8 @@ function handleBrowserMessage(message, ws) {
 
   // Handle requests from WebSocket clients (for testing/non-MCP access)
   // Forward to browsers and relay the response back
-  if (type === 'get_cell_value' || type === 'list_cells') {
-    const responseType = type === 'get_cell_value' ? 'cell_value_response' : 'cells_list_response';
+  if (type === 'GetCellValue' || type === 'ListCells') {
+    const responseType = type === 'GetCellValue' ? 'cell_value_response' : 'cells_list_response';
 
     // Set up response handler for this request
     const timeout = setTimeout(() => {
@@ -269,21 +269,21 @@ function createRequest(type, data, timeout = DEFAULT_TIMEOUT) {
  * Request cell value from browser
  */
 async function requestCellValue(cellName, timeout = DEFAULT_TIMEOUT) {
-  return createRequest('get_cell_value', { cellName }, timeout);
+  return createRequest('GetCellValue', { cellName }, timeout);
 }
 
 /**
  * Request list of cells from browser
  */
 async function requestCellsList(timeout = DEFAULT_TIMEOUT) {
-  return createRequest('list_cells', {}, timeout);
+  return createRequest('ListCells', {}, timeout);
 }
 
 /**
  * Request errors from browser
  */
 async function requestErrors(timeout = DEFAULT_TIMEOUT) {
-  return createRequest('get_errors', {}, timeout);
+  return createRequest('GetErrors', {}, timeout);
 }
 
 /**
@@ -291,7 +291,7 @@ async function requestErrors(timeout = DEFAULT_TIMEOUT) {
  */
 function broadcastRefresh() {
   const sessionId = `session-${Date.now()}`;
-  const message = JSON.stringify({ type: 'refresh', sessionId });
+  const message = JSON.stringify({ type: 'Refresh', sessionId });
 
   console.error(`[Server] Broadcasting refresh (new session: ${sessionId})`);
 
@@ -502,7 +502,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: 'refresh_notebook',
+        name: 'RefreshNotebook',
         description: 'Trigger notebook page refresh and wait for completion. Captures all logs and errors from the new session.',
         inputSchema: {
           type: 'object',
@@ -521,7 +521,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'get_cell_value',
+        name: 'GetCellValue',
         description: 'Get the current value of a specific cell from the running notebook',
         inputSchema: {
           type: 'object',
@@ -540,7 +540,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'list_cells',
+        name: 'ListCells',
         description: 'Get list of all defined cells in the running notebook',
         inputSchema: {
           type: 'object',
@@ -554,7 +554,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'get_session_logs',
+        name: 'GetSessionLogs',
         description: 'Get logs from the current or most recent session without triggering a refresh',
         inputSchema: {
           type: 'object',
@@ -571,7 +571,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'get_errors',
+        name: 'GetErrors',
         description: 'Get all runtime errors from cells in the notebook. Checks each cell and returns errors with cell name, message, and stack trace.',
         inputSchema: {
           type: 'object',
@@ -585,7 +585,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'capture_cell_image',
+        name: 'CaptureCellImage',
         description: 'Capture a canvas or image cell and save it to a temp file. Returns the file path so Claude can read and visually inspect it.',
         inputSchema: {
           type: 'object',
@@ -612,7 +612,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
-    if (name === 'refresh_notebook') {
+    if (name === 'RefreshNotebook') {
       const waitForSignal = args?.wait_for_completion !== false;
       const timeout = args?.timeout_ms || (waitForSignal ? COMPLETION_TIMEOUT : 5000);
 
@@ -622,7 +622,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Wait for completion
       const result = await waitForCompletion(sessionId, timeout);
 
-      // Format minimal response (logs available via get_session_logs)
+      // Format minimal response (logs available via GetSessionLogs)
       const session = result.session;
       const errorCount = session?.errors?.length || 0;
       const logCount = session?.logs?.length || 0;
@@ -643,7 +643,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         output.push('No errors');
       }
 
-      output.push(`Logs: ${logCount} (use get_session_logs to view)`);
+      output.push(`Logs: ${logCount} (use GetSessionLogs to view)`);
 
       return {
         content: [{
@@ -653,7 +653,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'get_cell_value') {
+    if (name === 'GetCellValue') {
       const { cell_name, timeout_ms = DEFAULT_TIMEOUT } = args;
 
       if (!cell_name) {
@@ -680,7 +680,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'list_cells') {
+    if (name === 'ListCells') {
       const { timeout_ms = DEFAULT_TIMEOUT } = args || {};
 
       const response = await requestCellsList(timeout_ms);
@@ -701,7 +701,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'get_session_logs') {
+    if (name === 'GetSessionLogs') {
       const { session_id, filter } = args || {};
 
       const sessionId = session_id || currentSessionId;
@@ -725,7 +725,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'get_errors') {
+    if (name === 'GetErrors') {
       const { timeout_ms = DEFAULT_TIMEOUT } = args || {};
 
       const response = await requestErrors(timeout_ms);
@@ -764,7 +764,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'capture_cell_image') {
+    if (name === 'CaptureCellImage') {
       const { cell_name, timeout_ms = DEFAULT_TIMEOUT } = args;
 
       if (!cell_name) {

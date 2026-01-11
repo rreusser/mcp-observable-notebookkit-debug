@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "Notebook": {
+      "command": "../bin/mcp-notebookkit-debug.js",
+      "args": []
+    }
+  }
+}
