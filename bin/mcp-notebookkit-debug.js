@@ -16,92 +16,263 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { WebSocketServer } from 'ws';
 import http from 'http';
-import { tmpdir } from 'os';
-import { writeFile } from 'fs/promises';
+import { writeFile, mkdir, rm } from 'fs/promises';
 import { join } from 'path';
+import { existsSync } from 'fs';
 
-const HTTP_PORT = 9898;
-const WS_PORT = 9899;
+// Port range for dynamic allocation
+const BASE_HTTP_PORT = 9898;
+const BASE_WS_PORT = 9899;
+const PORT_RANGE = 100; // Try up to 100 ports
+
 const DEFAULT_TIMEOUT = 5000;
 const COMPLETION_TIMEOUT = 30000;
+
+// Runtime port values (set during startup)
+let HTTP_PORT = BASE_HTTP_PORT;
+let WS_PORT = BASE_WS_PORT;
+
+// Debug directory for this project
+const DEBUG_DIR = join(process.cwd(), '.notebookkit-debug');
+const PORT_FILE = join(DEBUG_DIR, 'port');
+
+/**
+ * Ensure the debug directory exists
+ */
+async function ensureDebugDir() {
+  if (!existsSync(DEBUG_DIR)) {
+    await mkdir(DEBUG_DIR, { recursive: true });
+  }
+}
+
+/**
+ * Write the current ports to the port file
+ */
+async function writePortFile() {
+  await ensureDebugDir();
+  await writeFile(PORT_FILE, JSON.stringify({ http: HTTP_PORT, ws: WS_PORT }, null, 2));
+  console.error(`[Server] Port file written to ${PORT_FILE}`);
+}
+
+/**
+ * Clean up port file on exit
+ */
+async function cleanupPortFile() {
+  try {
+    if (existsSync(PORT_FILE)) {
+      await rm(PORT_FILE);
+      console.error('[Server] Port file cleaned up');
+    }
+  } catch (err) {
+    // Ignore cleanup errors
+  }
+}
+
+/**
+ * Try to start HTTP server on a port, returns true if successful
+ */
+function tryHttpPort(port) {
+  return new Promise((resolve) => {
+    const testServer = http.createServer();
+    testServer.once('error', () => {
+      testServer.close();
+      resolve(false);
+    });
+    testServer.once('listening', () => {
+      testServer.close();
+      resolve(true);
+    });
+    testServer.listen(port);
+  });
+}
+
+/**
+ * Find available ports for HTTP and WebSocket servers
+ */
+async function findAvailablePorts() {
+  for (let i = 0; i < PORT_RANGE; i++) {
+    const httpPort = BASE_HTTP_PORT + i * 2;
+    const wsPort = BASE_WS_PORT + i * 2;
+
+    const httpAvailable = await tryHttpPort(httpPort);
+    const wsAvailable = await tryHttpPort(wsPort);
+
+    if (httpAvailable && wsAvailable) {
+      return { httpPort, wsPort };
+    }
+  }
+  throw new Error(`Could not find available ports in range ${BASE_HTTP_PORT}-${BASE_HTTP_PORT + PORT_RANGE * 2}`);
+}
 
 // Session storage
 const sessions = new Map();
 let currentSessionId = null;
 
-// Connected browser clients
-const clients = new Set();
+// Connected browser clients: Map<WebSocket, { url, connectedAt, sessionId }>
+const clients = new Map();
 
 // Pending requests (for bidirectional communication)
 const pendingRequests = new Map();
 let requestCounter = 0;
 
 /**
- * Create HTTP server for status/session endpoints
+ * Get a short identifier for a notebook URL
  */
-const httpServer = http.createServer((req, res) => {
-  // Enable CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    res.writeHead(200);
-    res.end();
-    return;
+function getNotebookId(url) {
+  try {
+    const parsed = new URL(url);
+    // Return pathname without leading slash, or 'index' for root
+    const path = parsed.pathname.replace(/^\//, '') || 'index';
+    // Remove .html extension for cleaner display
+    return path.replace(/\.html$/, '');
+  } catch {
+    return url;
   }
-
-  if (req.url === '/status') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      currentSession: currentSessionId,
-      sessions: Array.from(sessions.keys()),
-      connectedClients: clients.size
-    }));
-  } else if (req.url.startsWith('/session/')) {
-    const sessionId = req.url.slice(9);
-    const session = sessions.get(sessionId);
-
-    if (session) {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(session, null, 2));
-    } else {
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Session not found' }));
-    }
-  } else {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Debug Server Running\n');
-  }
-});
+}
 
 /**
- * Create WebSocket server for browser connections
+ * Find a client by notebook identifier (URL, path, or index)
+ * Returns { client, info } or null
  */
-const wss = new WebSocketServer({ port: WS_PORT });
+function findClient(notebook) {
+  if (!notebook) {
+    // No notebook specified - return the only client or error
+    if (clients.size === 0) {
+      return { error: 'No connected notebooks' };
+    }
+    if (clients.size === 1) {
+      const [client, info] = clients.entries().next().value;
+      return { client, info };
+    }
+    // Multiple clients - list them
+    const list = Array.from(clients.values())
+      .map((info, i) => `  ${i}: ${getNotebookId(info.url)} (${info.url})`)
+      .join('\n');
+    return { error: `Multiple notebooks connected. Specify which one:\n${list}` };
+  }
 
-wss.on('connection', (ws) => {
-  console.error('[Server] Client connected');
-  clients.add(ws);
+  // Try to find by index (number)
+  const index = parseInt(notebook, 10);
+  if (!isNaN(index)) {
+    const entries = Array.from(clients.entries());
+    if (index >= 0 && index < entries.length) {
+      const [client, info] = entries[index];
+      return { client, info };
+    }
+    return { error: `Invalid notebook index: ${index}. ${clients.size} notebook(s) connected.` };
+  }
 
-  ws.on('message', (data) => {
-    try {
-      const message = JSON.parse(data.toString());
-      handleBrowserMessage(message, ws);
-    } catch (err) {
-      console.error('[Server] Failed to parse message:', err);
+  // Try to find by URL or notebook ID
+  for (const [client, info] of clients.entries()) {
+    if (info.url === notebook || getNotebookId(info.url) === notebook) {
+      return { client, info };
+    }
+  }
+
+  // Try partial match
+  for (const [client, info] of clients.entries()) {
+    if (info.url.includes(notebook) || getNotebookId(info.url).includes(notebook)) {
+      return { client, info };
+    }
+  }
+
+  const list = Array.from(clients.values())
+    .map((info, i) => `  ${i}: ${getNotebookId(info.url)}`)
+    .join('\n');
+  return { error: `Notebook "${notebook}" not found. Connected notebooks:\n${list}` };
+}
+
+// Server instances (created in main())
+let httpServer = null;
+let wss = null;
+
+/**
+ * Create and start HTTP server for status/session endpoints
+ */
+function createHttpServer() {
+  httpServer = http.createServer((req, res) => {
+    // Enable CORS
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
+    if (req.url === '/status') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      const notebooks = Array.from(clients.values()).map((info, i) => ({
+        index: i,
+        id: getNotebookId(info.url),
+        url: info.url,
+        connectedAt: info.connectedAt,
+        sessionId: info.sessionId
+      }));
+      res.end(JSON.stringify({
+        currentSession: currentSessionId,
+        sessions: Array.from(sessions.keys()),
+        notebooks,
+        connectedClients: clients.size,
+        ports: { http: HTTP_PORT, ws: WS_PORT }
+      }));
+    } else if (req.url.startsWith('/session/')) {
+      const sessionId = req.url.slice(9);
+      const session = sessions.get(sessionId);
+
+      if (session) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(session, null, 2));
+      } else {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Session not found' }));
+      }
+    } else {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('Debug Server Running\n');
     }
   });
 
-  ws.on('close', () => {
-    console.error('[Server] Client disconnected');
-    clients.delete(ws);
+  httpServer.listen(HTTP_PORT, () => {
+    console.error(`[Server] HTTP server running on http://localhost:${HTTP_PORT}`);
+  });
+}
+
+/**
+ * Create and start WebSocket server for browser connections
+ */
+function createWebSocketServer() {
+  wss = new WebSocketServer({ port: WS_PORT });
+
+  wss.on('connection', (ws) => {
+    console.error('[Server] Client connected');
+    // Initialize with unknown URL - will be updated on session_start
+    clients.set(ws, { url: 'unknown', connectedAt: Date.now(), sessionId: null });
+
+    ws.on('message', (data) => {
+      try {
+        const message = JSON.parse(data.toString());
+        handleBrowserMessage(message, ws);
+      } catch (err) {
+        console.error('[Server] Failed to parse message:', err);
+      }
+    });
+
+    ws.on('close', () => {
+      const info = clients.get(ws);
+      console.error(`[Server] Client disconnected: ${info?.url || 'unknown'}`);
+      clients.delete(ws);
+    });
+
+    ws.on('error', (err) => {
+      console.error('[Server] WebSocket error:', err);
+    });
   });
 
-  ws.on('error', (err) => {
-    console.error('[Server] WebSocket error:', err);
-  });
-});
+  console.error(`[Server] WebSocket server running on ws://localhost:${WS_PORT}`);
+}
 
 /**
  * Handle messages from browser clients
@@ -113,7 +284,8 @@ function handleBrowserMessage(message, ws) {
   if (type === 'value_response' || type === 'values_response' ||
       type === 'values_list_response' || type === 'metadata_response' ||
       type === 'cell_value_response' || type === 'cells_list_response' ||
-      type === 'errors_response') {
+      type === 'errors_response' || type === 'setinput_response' ||
+      type === 'elementcontent_response' || type === 'dependencygraph_response') {
     const pending = pendingRequests.get(requestId);
     if (pending) {
       clearTimeout(pending.timer);
@@ -156,17 +328,26 @@ function handleBrowserMessage(message, ws) {
 
     // Broadcast to all OTHER clients (browsers)
     const broadcastMsg = JSON.stringify(message);
-    clients.forEach(client => {
+    for (const [client] of clients) {
       if (client !== ws && client.readyState === 1) {
         client.send(broadcastMsg);
       }
-    });
+    }
     return;
   }
 
-  // Handle session start
+  // Handle session start - update client info with URL
   if (type === 'session_start') {
     currentSessionId = sessionId;
+
+    // Update client info with URL from session start
+    const clientInfo = clients.get(ws);
+    if (clientInfo && data?.url) {
+      clientInfo.url = data.url;
+      clientInfo.sessionId = sessionId;
+      console.error(`[Server] Notebook connected: ${getNotebookId(data.url)} (${data.url})`);
+    }
+
     const existing = sessions.get(sessionId);
     if (existing) {
       existing.startTime = timestamp;
@@ -242,11 +423,29 @@ function handleBrowserMessage(message, ws) {
 
 /**
  * Create a request to browser and wait for response
+ * @param {string} type - Message type
+ * @param {object} data - Message data
+ * @param {number} timeout - Timeout in ms
+ * @param {string} notebook - Optional notebook identifier (URL, path, or index)
  */
-function createRequest(type, data, timeout = DEFAULT_TIMEOUT) {
+function createRequest(type, data, timeout = DEFAULT_TIMEOUT, notebook = null) {
   const requestId = `req-${++requestCounter}`;
 
   return new Promise((resolve, reject) => {
+    // Find the target client
+    const result = findClient(notebook);
+    if (result.error) {
+      reject(new Error(result.error));
+      return;
+    }
+
+    const { client } = result;
+
+    if (client.readyState !== 1) {
+      reject(new Error('Notebook client not ready'));
+      return;
+    }
+
     const timer = setTimeout(() => {
       pendingRequests.delete(requestId);
       reject(new Error('Request timeout'));
@@ -255,71 +454,93 @@ function createRequest(type, data, timeout = DEFAULT_TIMEOUT) {
     pendingRequests.set(requestId, { resolve, reject, timer });
 
     const message = JSON.stringify({ type, requestId, ...data });
-    let sent = false;
-    clients.forEach(client => {
-      if (client.readyState === 1) {
-        client.send(message);
-        sent = true;
-      }
-    });
-
-    if (!sent) {
-      clearTimeout(timer);
-      pendingRequests.delete(requestId);
-      reject(new Error('No connected clients'));
-    }
+    client.send(message);
   });
 }
 
 /**
  * Request a single value from browser
  */
-async function requestValue(name, timeout = DEFAULT_TIMEOUT) {
-  return createRequest('GetValue', { name }, timeout);
+async function requestValue(name, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('GetValue', { name }, timeout, notebook);
 }
 
 /**
  * Request multiple/all values from browser
  */
-async function requestValues(names, timeout = DEFAULT_TIMEOUT) {
-  return createRequest('GetValues', { names }, timeout);
+async function requestValues(names, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('GetValues', { names }, timeout, notebook);
 }
 
 /**
  * Request list of values from browser
  */
-async function requestValuesList(timeout = DEFAULT_TIMEOUT) {
-  return createRequest('ListValues', {}, timeout);
+async function requestValuesList(timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('ListValues', {}, timeout, notebook);
 }
 
 /**
  * Request value metadata from browser
  */
-async function requestValueMetadata(name, timeout = DEFAULT_TIMEOUT) {
-  return createRequest('GetValueMetadata', { name }, timeout);
+async function requestValueMetadata(name, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('GetValueMetadata', { name }, timeout, notebook);
 }
 
 /**
  * Request errors from browser
  */
-async function requestErrors(timeout = DEFAULT_TIMEOUT) {
-  return createRequest('GetErrors', {}, timeout);
+async function requestErrors(timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('GetErrors', {}, timeout, notebook);
 }
 
 /**
- * Broadcast refresh command to all clients
+ * Request to set an input value in browser
  */
-function broadcastRefresh() {
+async function requestSetInput(name, value, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('SetInput', { name, value }, timeout, notebook);
+}
+
+/**
+ * Request element content from browser
+ */
+async function requestElementContent(selector, mode = 'auto', timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('GetElementContent', { selector, mode }, timeout, notebook);
+}
+
+/**
+ * Request dependency graph from browser
+ */
+async function requestDependencyGraph(filters = {}, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('GetDependencyGraph', { filters }, timeout, notebook);
+}
+
+/**
+ * Send refresh command to a specific notebook or all notebooks
+ */
+function sendRefresh(notebook = null) {
   const sessionId = `session-${Date.now()}`;
   const message = JSON.stringify({ type: 'Refresh', sessionId });
 
-  console.error(`[Server] Broadcasting refresh (new session: ${sessionId})`);
-
-  clients.forEach(client => {
+  if (notebook) {
+    // Target specific notebook
+    const result = findClient(notebook);
+    if (result.error) {
+      throw new Error(result.error);
+    }
+    const { client, info } = result;
     if (client.readyState === 1) {
+      console.error(`[Server] Refreshing notebook: ${getNotebookId(info.url)}`);
       client.send(message);
     }
-  });
+  } else {
+    // Refresh all notebooks
+    console.error(`[Server] Refreshing all notebooks (new session: ${sessionId})`);
+    for (const [client, info] of clients) {
+      if (client.readyState === 1) {
+        client.send(message);
+      }
+    }
+  }
 
   return sessionId;
 }
@@ -557,16 +778,31 @@ const server = new Server(
   }
 );
 
+// Common notebook parameter for all tools
+const notebookParam = {
+  type: 'string',
+  description: 'Target notebook (URL, path like "index" or "second-notebook", or index like "0"). Required when multiple notebooks are connected.'
+};
+
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
+      {
+        name: 'ListNotebooks',
+        description: 'List all connected notebooks. Use this to see which notebooks are available before targeting a specific one.',
+        inputSchema: {
+          type: 'object',
+          properties: {}
+        }
+      },
       {
         name: 'Refresh',
         description: 'Trigger notebook page refresh and wait for completion. Captures all logs and errors from the new session.',
         inputSchema: {
           type: 'object',
           properties: {
+            notebook: notebookParam,
             wait_for_completion: {
               type: 'boolean',
               description: 'Wait for session_end signal (recommended)',
@@ -586,6 +822,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: 'object',
           properties: {
+            notebook: notebookParam,
             timeout_ms: {
               type: 'number',
               description: 'Maximum time to wait in milliseconds',
@@ -596,10 +833,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'GetValue',
-        description: 'Get a specific value from the running notebook. Returns the value along with its state (fulfilled, pending, or rejected).',
+        description: 'Get a specific value from the running notebook. Returns the value along with its state (fulfilled, pending, or rejected). Automatically returns image content for Canvas and SVG elements.',
         inputSchema: {
           type: 'object',
           properties: {
+            notebook: notebookParam,
             name: {
               type: 'string',
               description: 'Name of the value to retrieve'
@@ -619,6 +857,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: 'object',
           properties: {
+            notebook: notebookParam,
             names: {
               type: 'array',
               items: { type: 'string' },
@@ -638,6 +877,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: 'object',
           properties: {
+            notebook: notebookParam,
             name: {
               type: 'string',
               description: 'Name of the value'
@@ -674,6 +914,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: 'object',
           properties: {
+            notebook: notebookParam,
             timeout_ms: {
               type: 'number',
               description: 'Maximum time to wait in milliseconds',
@@ -683,14 +924,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'CaptureImage',
-        description: 'Capture a canvas value and save it to a temp file. Returns the file path so it can be viewed.',
+        name: 'SetInput',
+        description: 'Set the value of an input element (viewof cell) in the notebook. This triggers reactive updates to dependent cells.',
         inputSchema: {
           type: 'object',
           properties: {
+            notebook: notebookParam,
             name: {
               type: 'string',
-              description: 'Name of the value containing a canvas'
+              description: 'Name of the input value to set (the viewof cell name)'
+            },
+            value: {
+              description: 'The value to set'
             },
             timeout_ms: {
               type: 'number',
@@ -698,7 +943,72 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               default: DEFAULT_TIMEOUT
             }
           },
-          required: ['name']
+          required: ['name', 'value']
+        }
+      },
+      {
+        name: 'GetElementContent',
+        description: 'Get content from a DOM element by CSS selector. Auto-detects element type: returns text/HTML for regular elements, returns image content for canvas/SVG elements.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            selector: {
+              type: 'string',
+              description: 'CSS selector for the element (e.g., "#cell-31", ".my-class", "svg.chart")'
+            },
+            mode: {
+              type: 'string',
+              enum: ['auto', 'text', 'html', 'image'],
+              description: 'Content extraction mode. "auto" (default) detects based on element type. "text" returns textContent, "html" returns innerHTML, "image" captures as PNG.',
+              default: 'auto'
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          },
+          required: ['selector']
+        }
+      },
+      {
+        name: 'GetDependencyGraph',
+        description: 'Get the full dependency graph of the notebook showing how values depend on each other. Returns nodes (values) and edges (dependencies).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            name: {
+              type: 'string',
+              description: 'Focus on a specific node - shows its upstream dependencies and/or downstream dependents'
+            },
+            pattern: {
+              type: 'string',
+              description: 'Filter nodes by name pattern (supports * wildcard, e.g., "chain*", "*Error")'
+            },
+            direction: {
+              type: 'string',
+              enum: ['both', 'upstream', 'downstream'],
+              description: 'When using "name" filter: "upstream" shows dependencies, "downstream" shows dependents, "both" shows all connected nodes',
+              default: 'both'
+            },
+            depth: {
+              type: 'number',
+              description: 'Maximum depth to traverse when using "name" filter (default: unlimited)',
+              default: -1
+            },
+            include_anonymous: {
+              type: 'boolean',
+              description: 'Include anonymous values (cell 1, cell 2, etc.) in output. These are intermediate values from cells without named exports. Default false to reduce noise.',
+              default: false
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          }
         }
       }
     ]
@@ -710,11 +1020,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
-    if (name === 'Refresh') {
-      const waitForSignal = args?.wait_for_completion !== false;
-      const timeout = args?.timeout_ms || (waitForSignal ? COMPLETION_TIMEOUT : 5000);
+    if (name === 'ListNotebooks') {
+      if (clients.size === 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: 'No notebooks connected.\n\nMake sure your notebook is running with the debug plugin enabled.'
+          }]
+        };
+      }
 
-      const sessionId = broadcastRefresh();
+      const notebooks = Array.from(clients.values()).map((info, i) => {
+        const id = getNotebookId(info.url);
+        const connectedAgo = Math.round((Date.now() - info.connectedAt) / 1000);
+        return `${i}: ${id}\n   URL: ${info.url}\n   Connected: ${connectedAgo}s ago`;
+      });
+
+      return {
+        content: [{
+          type: 'text',
+          text: `Connected notebooks (${clients.size}):\n\n${notebooks.join('\n\n')}`
+        }]
+      };
+    }
+
+    if (name === 'Refresh') {
+      const { notebook, wait_for_completion, timeout_ms } = args || {};
+      const waitForSignal = wait_for_completion !== false;
+      const timeout = timeout_ms || (waitForSignal ? COMPLETION_TIMEOUT : 5000);
+
+      const sessionId = sendRefresh(notebook);
       const result = await waitForCompletion(sessionId, timeout);
 
       const session = result.session;
@@ -747,9 +1082,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'ListValues') {
-      const { timeout_ms = DEFAULT_TIMEOUT } = args || {};
+      const { notebook, timeout_ms = DEFAULT_TIMEOUT } = args || {};
 
-      const response = await requestValuesList(timeout_ms);
+      const response = await requestValuesList(timeout_ms, notebook);
 
       if (!response.success) {
         return {
@@ -768,7 +1103,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'GetValue') {
-      const { name: valueName, timeout_ms = DEFAULT_TIMEOUT } = args;
+      const { notebook, name: valueName, timeout_ms = DEFAULT_TIMEOUT } = args;
 
       if (!valueName) {
         return {
@@ -777,12 +1112,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const response = await requestValue(valueName, timeout_ms);
+      const response = await requestValue(valueName, timeout_ms, notebook);
 
       if (!response.success) {
         return {
           content: [{ type: 'text', text: `Error: ${response.error}` }],
           isError: true
+        };
+      }
+
+      // Return image content block for Canvas/SVG with image data
+      const value = response.value;
+      if (response.state === 'fulfilled' && value?.__type === 'Canvas' && value.data) {
+        return {
+          content: [
+            { type: 'text', text: `Value: ${valueName}\nState: fulfilled\nCanvas: ${value.width}x${value.height}` },
+            { type: 'image', data: value.data, mimeType: 'image/png' }
+          ]
+        };
+      }
+
+      if (response.state === 'fulfilled' && value?.__type === 'SVG' && value.data) {
+        return {
+          content: [
+            { type: 'text', text: `Value: ${valueName}\nState: fulfilled\nSVG: ${value.width}x${value.height}` },
+            { type: 'image', data: value.data, mimeType: 'image/png' }
+          ]
         };
       }
 
@@ -795,9 +1150,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'GetValues') {
-      const { names, timeout_ms = 100 } = args || {};
+      const { notebook, names, timeout_ms = 100 } = args || {};
 
-      const response = await requestValues(names, timeout_ms);
+      const response = await requestValues(names, timeout_ms, notebook);
 
       if (!response.success) {
         return {
@@ -835,7 +1190,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'GetValueMetadata') {
-      const { name: valueName, timeout_ms = DEFAULT_TIMEOUT } = args;
+      const { notebook, name: valueName, timeout_ms = DEFAULT_TIMEOUT } = args;
 
       if (!valueName) {
         return {
@@ -844,7 +1199,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const response = await requestValueMetadata(valueName, timeout_ms);
+      const response = await requestValueMetadata(valueName, timeout_ms, notebook);
 
       if (!response.success) {
         return {
@@ -886,9 +1241,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'GetErrors') {
-      const { timeout_ms = DEFAULT_TIMEOUT } = args || {};
+      const { notebook, timeout_ms = DEFAULT_TIMEOUT } = args || {};
 
-      const response = await requestErrors(timeout_ms);
+      const response = await requestErrors(timeout_ms, notebook);
 
       if (!response.success) {
         return {
@@ -924,8 +1279,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'CaptureImage') {
-      const { name: valueName, timeout_ms = DEFAULT_TIMEOUT } = args;
+    if (name === 'SetInput') {
+      const { notebook, name: valueName, value, timeout_ms = DEFAULT_TIMEOUT } = args;
 
       if (!valueName) {
         return {
@@ -934,7 +1289,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const response = await requestValue(valueName, timeout_ms);
+      if (value === undefined) {
+        return {
+          content: [{ type: 'text', text: 'Error: value is required' }],
+          isError: true
+        };
+      }
+
+      const response = await requestSetInput(valueName, value, timeout_ms, notebook);
 
       if (!response.success) {
         return {
@@ -943,55 +1305,154 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      if (response.state === 'rejected') {
-        return {
-          content: [{ type: 'text', text: `Error: Value is in rejected state: ${response.error}` }],
-          isError: true
-        };
+      const output = [`Set "${valueName}" to ${JSON.stringify(value)}`];
+
+      if (response.previousValue !== undefined) {
+        output.push(`Previous value: ${JSON.stringify(response.previousValue)}`);
       }
 
-      if (response.state === 'pending') {
-        return {
-          content: [{ type: 'text', text: `Error: Value is still pending` }],
-          isError: true
-        };
-      }
-
-      const value = response.value;
-
-      // Check if it's a canvas with base64 data
-      if (value?.__type === 'Canvas' && value.data) {
-        const filename = `notebook-capture-${valueName}-${Date.now()}.png`;
-        const filepath = join(tmpdir(), filename);
-
-        const buffer = Buffer.from(value.data, 'base64');
-        await writeFile(filepath, buffer);
-
-        return {
-          content: [{
-            type: 'text',
-            text: `Captured canvas "${valueName}" (${value.width}x${value.height}) to:\n${filepath}\n\nUse the Read tool to view the image.`
-          }]
-        };
-      }
-
-      // Check if it's an element that might be an image
-      if (value?.__type === 'Element' && value.tagName === 'img') {
-        return {
-          content: [{
-            type: 'text',
-            text: `Value "${valueName}" is an <img> element. Image capture for <img> tags is not yet supported.`
-          }],
-          isError: true
-        };
+      if (response.newValue !== undefined) {
+        output.push(`New value: ${JSON.stringify(response.newValue)}`);
       }
 
       return {
         content: [{
           type: 'text',
-          text: `Value "${valueName}" is not a canvas. Type: ${value?.__type || typeof value}`
-        }],
-        isError: true
+          text: output.join('\n')
+        }]
+      };
+    }
+
+    if (name === 'GetElementContent') {
+      const { notebook, selector, mode = 'auto', timeout_ms = DEFAULT_TIMEOUT } = args;
+
+      if (!selector) {
+        return {
+          content: [{ type: 'text', text: 'Error: selector is required' }],
+          isError: true
+        };
+      }
+
+      const response = await requestElementContent(selector, mode, timeout_ms, notebook);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      const content = [];
+      const textOutput = [];
+      textOutput.push(`Element: ${response.tagName} (${selector})`);
+
+      if (response.elementType) {
+        textOutput.push(`Type: ${response.elementType}`);
+      }
+
+      // Handle image data - return as image content block
+      if (response.imageData) {
+        textOutput.push(`Image: ${response.width}x${response.height}`);
+        content.push({ type: 'text', text: textOutput.join('\n') });
+        content.push({ type: 'image', data: response.imageData, mimeType: 'image/png' });
+      } else {
+        // Handle text content
+        if (response.textContent !== undefined) {
+          textOutput.push(`\nText content:\n${response.textContent}`);
+        }
+
+        // Handle HTML content
+        if (response.innerHTML !== undefined && mode === 'html') {
+          textOutput.push(`\nHTML:\n${response.innerHTML}`);
+        }
+
+        // Handle SVG source
+        if (response.svgSource !== undefined) {
+          textOutput.push(`\nSVG source:\n${response.svgSource}`);
+        }
+
+        content.push({ type: 'text', text: textOutput.join('\n') });
+      }
+
+      return { content };
+    }
+
+    if (name === 'GetDependencyGraph') {
+      const {
+        notebook,
+        name: filterName,
+        pattern,
+        direction = 'both',
+        depth = -1,
+        include_anonymous = false,
+        timeout_ms = DEFAULT_TIMEOUT
+      } = args || {};
+
+      const filters = { name: filterName, pattern, direction, depth, include_anonymous };
+      const response = await requestDependencyGraph(filters, timeout_ms, notebook);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      const { nodes, edges } = response.graph;
+      const output = [];
+
+      // Build header with filter info
+      output.push(`# Dependency Graph\n`);
+      if (filterName) {
+        output.push(`Filter: focused on "${filterName}" (${direction})`);
+      } else if (pattern) {
+        output.push(`Filter: pattern "${pattern}"`);
+      }
+      if (!include_anonymous) {
+        output.push(`(anonymous values hidden, use include_anonymous=true to show)`);
+      }
+      output.push(`Nodes: ${nodes.length}`);
+      output.push(`Edges: ${edges.length}\n`);
+
+      // Group nodes by their dependency depth (roots first)
+      const roots = nodes.filter(n => !n.inputs || n.inputs.length === 0);
+      const nonRoots = nodes.filter(n => n.inputs && n.inputs.length > 0);
+
+      if (roots.length > 0) {
+        output.push(`## Root nodes (no dependencies)`);
+        for (const node of roots) {
+          const stateIcon = node.state === 'fulfilled' ? '✓' : node.state === 'rejected' ? '✗' : '⋯';
+          output.push(`- ${stateIcon} ${node.name}${node.valueType ? ` (${node.valueType})` : ''}`);
+        }
+        output.push('');
+      }
+
+      if (nonRoots.length > 0) {
+        output.push(`## Dependent nodes`);
+        for (const node of nonRoots) {
+          const stateIcon = node.state === 'fulfilled' ? '✓' : node.state === 'rejected' ? '✗' : '⋯';
+          const deps = node.inputs.join(', ');
+          output.push(`- ${stateIcon} ${node.name}${node.valueType ? ` (${node.valueType})` : ''} ← [${deps}]`);
+        }
+        output.push('');
+      }
+
+      // Show edges in a compact format
+      if (edges.length > 0) {
+        output.push(`## Edges (from → to)`);
+        for (const edge of edges.slice(0, 50)) {
+          output.push(`  ${edge.from} → ${edge.to}`);
+        }
+        if (edges.length > 50) {
+          output.push(`  ... and ${edges.length - 50} more`);
+        }
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: output.join('\n')
+        }]
       };
     }
 
@@ -1010,15 +1471,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start servers
 async function main() {
-  httpServer.listen(HTTP_PORT, () => {
-    console.error(`[Server] HTTP server running on http://localhost:${HTTP_PORT}`);
+  // Find available ports
+  console.error('[Server] Finding available ports...');
+  const ports = await findAvailablePorts();
+  HTTP_PORT = ports.httpPort;
+  WS_PORT = ports.wsPort;
+  console.error(`[Server] Using ports: HTTP=${HTTP_PORT}, WS=${WS_PORT}`);
+
+  // Create servers
+  createHttpServer();
+  createWebSocketServer();
+
+  // Write port file for Vite plugin to read
+  await writePortFile();
+
+  // Set up cleanup on exit
+  const cleanup = async () => {
+    await cleanupPortFile();
+    process.exit(0);
+  };
+
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+  process.on('exit', () => {
+    // Synchronous cleanup attempt on exit
+    try {
+      if (existsSync(PORT_FILE)) {
+        require('fs').unlinkSync(PORT_FILE);
+      }
+    } catch (err) {
+      // Ignore
+    }
   });
 
-  console.error(`[Server] WebSocket server running on ws://localhost:${WS_PORT}`);
-
+  // Start MCP server
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Debug Notebook MCP server running on stdio');
+  console.error('[Server] Debug Notebook MCP server running on stdio');
 }
 
 main().catch((error) => {

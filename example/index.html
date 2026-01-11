@@ -1,0 +1,256 @@
+<!doctype html>
+<notebook theme="air">
+  <title>Debug Test Cases</title>
+  <script id="1" type="text/markdown">
+    # Debug Test Cases
+    This notebook covers the basic gamut of value types and states for testing the MCP debug tools.
+  </script>
+  <script id="2" type="module" pinned="">
+    const number = 42;
+  </script>
+  <script id="3" type="module" pinned="">
+    const string = "hello world";
+  </script>
+  <script id="4" type="module" pinned="">
+    const boolean = true;
+  </script>
+  <script id="5" type="module" pinned="">
+    const nullValue = null;
+  </script>
+  <script id="6" type="module" pinned="">
+    const array = [1, 2, 3, 4, 5];
+  </script>
+  <script id="7" type="module" pinned="">
+    const object = { name: "test", value: 123, nested: { a: 1, b: 2 } };
+  </script>
+  <script id="8" type="module" pinned="">
+    const computed = number * 2;
+  </script>
+  <script id="9" type="module" pinned="">
+    const dependsOnMultiple = number + array.length;
+  </script>
+  <script id="10" type="module" pinned="">
+    function myFunction(x) {
+      return x * 2;
+    }
+  </script>
+  <script id="27" type="text/x-typescript" pinned="">
+    const rangeInput = Inputs.range([1, 10], {step: 1})
+    const rangeValue = view(rangeInput)
+  </script>
+  <script id="31" type="text/markdown">
+    Value is ${rangeValue}.
+  </script>
+  <script id="11" type="module" pinned="">
+    const asyncValue = new Promise(resolve => {
+      setTimeout(() => resolve("async resolved!"), 100);
+    });
+  </script>
+  <script id="12" type="module" pinned="">
+    const slowAsync = new Promise(resolve => {
+      setTimeout(() => resolve("slow resolved!"), 5000);
+    });
+  </script>
+  <script id="13" type="module" pinned="">
+    const runtimeError = (() => {
+      throw new Error("This is a runtime error");
+    })();
+  </script>
+  <script id="14" type="module" pinned="">
+    const referenceError = undefinedVariable + 1;
+  </script>
+  <script id="15" type="module" pinned="">
+    const canvas = display((() => {
+      const c = document.createElement("canvas");
+      c.width = 200;
+      c.height = 100;
+      const ctx = c.getContext("2d");
+      ctx.fillStyle = "#3b82f6";
+      ctx.fillRect(0, 0, 200, 100);
+      ctx.fillStyle = "white";
+      ctx.font = "20px sans-serif";
+      ctx.fillText("Hello Canvas", 30, 55);
+      return c;
+    })());
+  </script>
+  <script id="16" type="module" pinned="">
+    const element = (() => {
+      const div = document.createElement("div");
+      div.id = "test-element";
+      div.className = "test-class";
+      div.innerHTML = "<span>Hello DOM</span>";
+      return div;
+    })();
+  </script>
+  <script id="26" type="module" pinned="">
+    // Plain SVG created with DOM APIs
+    const plainSvg = display((() => {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("width", "200");
+      svg.setAttribute("height", "100");
+      svg.setAttribute("viewBox", "0 0 200 100");
+
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("width", "200");
+      rect.setAttribute("height", "100");
+      rect.setAttribute("fill", "#10b981");
+      svg.appendChild(rect);
+
+      const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      text.setAttribute("x", "100");
+      text.setAttribute("y", "55");
+      text.setAttribute("text-anchor", "middle");
+      text.setAttribute("fill", "white");
+      text.setAttribute("font-size", "20");
+      text.setAttribute("font-family", "sans-serif");
+      text.textContent = "Plain SVG";
+      svg.appendChild(text);
+
+      return svg;
+    })());
+  </script>
+  <script id="28" type="module" pinned="">
+    // SVG created with d3
+    const d3Svg = display((() => {
+      const svg = d3.create("svg")
+        .attr("width", 200)
+        .attr("height", 100)
+        .attr("viewBox", "0 0 200 100");
+
+      svg.append("rect")
+        .attr("width", 200)
+        .attr("height", 100)
+        .attr("fill", "#8b5cf6");
+
+      svg.append("text")
+        .attr("x", 100)
+        .attr("y", 55)
+        .attr("text-anchor", "middle")
+        .attr("fill", "white")
+        .attr("font-size", 20)
+        .attr("font-family", "sans-serif")
+        .text("D3 SVG");
+
+      return svg.node();
+    })());
+  </script>
+  <script id="17" type="module" pinned="">
+    const typedArray = new Float32Array([1.1, 2.2, 3.3, 4.4, 5.5]);
+  </script>
+  <script id="18" type="module" pinned="">
+    const mapValue = new Map([["a", 1], ["b", 2], ["c", 3]]);
+  </script>
+  <script id="19" type="module" pinned="">
+    const setValue = new Set([1, 2, 3, 4, 5]);
+  </script>
+  <script id="20" type="module" pinned="">
+    const dateValue = new Date("2024-01-15T12:00:00Z");
+  </script>
+  <script id="21" type="module" pinned="">
+    const regexValue = /hello\s+world/gi;
+  </script>
+  <script id="22" type="module" pinned="">
+    const largeArray = Array.from({ length: 500 }, (_, i) => i);
+  </script>
+  <script id="23" type="module" pinned="">
+    const circular = (() => {
+      const obj = { name: "circular" };
+      obj.self = obj;
+      return obj;
+    })();
+  </script>
+  <script id="24" type="module" pinned="">
+    function* generatorFn() {
+      yield 1;
+      yield 2;
+      yield 3;
+    }
+  </script>
+  <script id="25" type="module" pinned="">
+    async function asyncFn() {
+      return "async result";
+    }
+  </script>
+
+  <!-- Dependency chain examples -->
+  <script id="100" type="text/markdown">
+    ## Dependency Chain Examples
+    The following cells demonstrate various dependency patterns.
+  </script>
+
+  <!-- Linear chain: base → derived1 → derived2 → derived3 -->
+  <script id="101" type="module" pinned="">
+    const chainBase = 10;
+  </script>
+  <script id="102" type="module" pinned="">
+    const chainDerived1 = chainBase * 2;
+  </script>
+  <script id="103" type="module" pinned="">
+    const chainDerived2 = chainDerived1 + 5;
+  </script>
+  <script id="104" type="module" pinned="">
+    const chainDerived3 = chainDerived2 * chainDerived2;
+  </script>
+
+  <!-- Diamond pattern: diamondTop → (diamondLeft, diamondRight) → diamondBottom -->
+  <script id="110" type="module" pinned="">
+    const diamondTop = 100;
+  </script>
+  <script id="111" type="module" pinned="">
+    const diamondLeft = diamondTop / 2;
+  </script>
+  <script id="112" type="module" pinned="">
+    const diamondRight = diamondTop / 4;
+  </script>
+  <script id="113" type="module" pinned="">
+    const diamondBottom = diamondLeft + diamondRight;
+  </script>
+
+  <!-- Fan-out: fanSource → (fanA, fanB, fanC, fanD) -->
+  <script id="120" type="module" pinned="">
+    const fanSource = { x: 1, y: 2, z: 3 };
+  </script>
+  <script id="121" type="module" pinned="">
+    const fanA = fanSource.x;
+  </script>
+  <script id="122" type="module" pinned="">
+    const fanB = fanSource.y;
+  </script>
+  <script id="123" type="module" pinned="">
+    const fanC = fanSource.z;
+  </script>
+  <script id="124" type="module" pinned="">
+    const fanD = fanSource.x + fanSource.y + fanSource.z;
+  </script>
+
+  <!-- Fan-in: (inputA, inputB, inputC) → aggregated -->
+  <script id="130" type="module" pinned="">
+    const inputA = "Hello";
+  </script>
+  <script id="131" type="module" pinned="">
+    const inputB = " ";
+  </script>
+  <script id="132" type="module" pinned="">
+    const inputC = "World";
+  </script>
+  <script id="133" type="module" pinned="">
+    const aggregated = inputA + inputB + inputC;
+  </script>
+
+  <!-- Mixed: combines multiple patterns -->
+  <script id="140" type="module" pinned="">
+    const mixedRoot = 5;
+  </script>
+  <script id="141" type="module" pinned="">
+    const mixedBranch1 = mixedRoot * 2;
+  </script>
+  <script id="142" type="module" pinned="">
+    const mixedBranch2 = mixedRoot * 3;
+  </script>
+  <script id="143" type="module" pinned="">
+    const mixedMerge = mixedBranch1 + mixedBranch2 + chainBase;
+  </script>
+  <script id="144" type="module" pinned="">
+    const mixedFinal = mixedMerge + diamondBottom;
+  </script>
+</notebook>

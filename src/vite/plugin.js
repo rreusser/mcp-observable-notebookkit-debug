@@ -12,7 +12,9 @@
  *   });
  */
 
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
+import { join } from "path";
+
 const runtimeExposeCode = readFileSync(
   new URL("./client/runtime-expose.js", import.meta.url),
   "utf-8"
@@ -30,12 +32,32 @@ const debugClientCode = readFileSync(
 const VIRTUAL_RUNTIME_ID = "virtual:debug-notebook-runtime";
 const RESOLVED_VIRTUAL_RUNTIME_ID = "\0" + VIRTUAL_RUNTIME_ID;
 
+// Default ports (fallback if port file not found)
+const DEFAULT_WS_PORT = 9899;
+
+/**
+ * Read the port configuration from .notebookkit-debug/port
+ */
+function readPortConfig(projectRoot) {
+  const portFile = join(projectRoot, ".notebookkit-debug", "port");
+  try {
+    if (existsSync(portFile)) {
+      const config = JSON.parse(readFileSync(portFile, "utf-8"));
+      return config;
+    }
+  } catch (err) {
+    console.warn("[debug-notebook] Could not read port file:", err.message);
+  }
+  return { ws: DEFAULT_WS_PORT };
+}
+
 /**
  * Vite plugin for notebook debugging
  * Only activates in development mode
  */
 export function debugNotebook() {
   let isDevMode = false;
+  let projectRoot = process.cwd();
 
   return {
     name: "debug-notebook",
@@ -43,6 +65,7 @@ export function debugNotebook() {
 
     configResolved(config) {
       isDevMode = config.command === "serve";
+      projectRoot = config.root || process.cwd();
     },
 
     // Virtual module resolution for runtime exposure
@@ -88,11 +111,21 @@ export function debugNotebook() {
         return html;
       }
 
+      // Read port config fresh each time (in case MCP server restarted)
+      const portConfig = readPortConfig(projectRoot);
+      const configScript = `window.__NOTEBOOKKIT_DEBUG_CONFIG__ = ${JSON.stringify(portConfig)};`;
+
       return [
         // Early console patch - must run before anything else
         {
           tag: "script",
           children: earlyConsolePatch,
+          injectTo: "head-prepend",
+        },
+        // Port configuration - inject before debug client
+        {
+          tag: "script",
+          children: configScript,
           injectTo: "head-prepend",
         },
         // Runtime exposure - served via middleware with Vite transform
