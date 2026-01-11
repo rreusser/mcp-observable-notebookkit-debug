@@ -2,9 +2,11 @@
 
 MCP server for debugging [Observable Notebook Kit](https://github.com/observablehq/notebook-kit) notebooks. Enables AI assistants to inspect cell values, view errors, and capture canvas output from notebooks running in a web browser.
 
+For a fully working example, see [./example](./example).
+
 ## Setup
 
-### 1. Install the package (not yet published to npm)
+### 1. Install the package (not yet published to npm, you'll need to install from github for now.)
 
 ```bash
 npm install @rreusser/mcp-observable-notebookkit-debug
