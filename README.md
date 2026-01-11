@@ -4,7 +4,7 @@ MCP server for debugging [Observable Notebook Kit](https://github.com/observable
 
 ## Setup
 
-### 1. Install the package
+### 1. Install the package (not yet published to npm)
 
 ```bash
 npm install @rreusser/mcp-observable-notebookkit-debug
