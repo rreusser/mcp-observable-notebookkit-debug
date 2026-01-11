@@ -56,3 +56,7 @@ npm run start   # or: vite
 | `GetErrors`        | Get all runtime errors from notebook cells              |
 | `GetSessionLogs`   | View console logs from the current session              |
 | `CaptureCellImage` | Save a canvas cell to a temp file for visual inspection |
+
+## License
+
+&copy; 2026 Ricky Reusser. MIT License.
