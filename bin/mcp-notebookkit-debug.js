@@ -285,7 +285,8 @@ function handleBrowserMessage(message, ws) {
       type === 'values_list_response' || type === 'metadata_response' ||
       type === 'cell_value_response' || type === 'cells_list_response' ||
       type === 'errors_response' || type === 'setinput_response' ||
-      type === 'elementcontent_response' || type === 'dependencygraph_response') {
+      type === 'elementcontent_response' || type === 'dependencygraph_response' ||
+      type === 'eval_response') {
     const pending = pendingRequests.get(requestId);
     if (pending) {
       clearTimeout(pending.timer);
@@ -515,6 +516,13 @@ async function requestDependencyGraph(filters = {}, timeout = DEFAULT_TIMEOUT, n
 }
 
 /**
+ * Request JavaScript code execution in browser
+ */
+async function requestEval(code, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('Eval', { code }, timeout, notebook);
+}
+
+/**
  * Send refresh command to a specific notebook or all notebooks
  */
 function sendRefresh(notebook = null) {
@@ -587,8 +595,11 @@ async function waitForCompletion(sessionId, timeout) {
 
 /**
  * Format session output for display
+ * @param {Object} session - The session object
+ * @param {string} filter - Optional filter string
+ * @param {number} maxChars - Maximum output length (0 for unlimited)
  */
-function formatSessionOutput(session, filter) {
+function formatSessionOutput(session, filter, maxChars = 2000) {
   if (!session) {
     return 'No session data available';
   }
@@ -655,7 +666,14 @@ function formatSessionOutput(session, filter) {
     });
   }
 
-  return output.join('\n');
+  let result = output.join('\n');
+
+  // Apply truncation if maxChars is set (non-zero)
+  if (maxChars > 0 && result.length > maxChars) {
+    result = result.slice(0, maxChars) + '\n\n[OUTPUT TRUNCATED - ' + result.length + ' chars total, showing first ' + maxChars + '. Use max_chars parameter to adjust limit or filter to narrow results.]';
+  }
+
+  return result;
 }
 
 /**
@@ -904,6 +922,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             filter: {
               type: 'string',
               description: 'Filter logs by substring match'
+            },
+            max_chars: {
+              type: 'number',
+              description: 'Maximum output length in characters (default: 2000). Set to 0 for unlimited.',
+              default: 2000
             }
           }
         }
@@ -1009,6 +1032,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               default: DEFAULT_TIMEOUT
             }
           }
+        }
+      },
+      {
+        name: 'Eval',
+        description: 'Execute arbitrary JavaScript code in the browser context. Returns the result of the expression. Useful for debugging DOM state, checking computed styles, element dimensions, etc.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            code: {
+              type: 'string',
+              description: 'JavaScript code to execute. The result of the last expression is returned.'
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          },
+          required: ['code']
         }
       }
     ]
@@ -1217,7 +1260,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'GetLogs') {
-      const { session_id, filter } = args || {};
+      const { session_id, filter, max_chars = 2000 } = args || {};
 
       const sessionId = session_id || currentSessionId;
 
@@ -1235,7 +1278,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: 'text',
-          text: formatSessionOutput(session, filter)
+          text: formatSessionOutput(session, filter, max_chars)
         }]
       };
     }
@@ -1446,6 +1489,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (edges.length > 50) {
           output.push(`  ... and ${edges.length - 50} more`);
         }
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: output.join('\n')
+        }]
+      };
+    }
+
+    if (name === 'Eval') {
+      const { notebook, code, timeout_ms = DEFAULT_TIMEOUT } = args;
+
+      if (!code) {
+        return {
+          content: [{ type: 'text', text: 'Error: code is required' }],
+          isError: true
+        };
+      }
+
+      const response = await requestEval(code, timeout_ms, notebook);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      const output = [];
+
+      if (response.error) {
+        output.push(`Execution error: ${response.error}`);
+        if (response.stack) {
+          output.push(`Stack:\n${response.stack.split('\n').slice(0, 5).join('\n')}`);
+        }
+      } else {
+        output.push(`Result:`);
+        output.push(formatValue(response.result));
       }
 
       return {

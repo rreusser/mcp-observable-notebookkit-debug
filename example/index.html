@@ -4,6 +4,9 @@
   <script id="1" type="text/markdown">
     # Debug Test Cases
     This notebook covers the basic gamut of value types and states for testing the MCP debug tools.
+
+    ## Basic Value Types
+    Primitive values, objects, arrays, and functions.
   </script>
   <script id="2" type="module" pinned="">
     const number = 42;
@@ -34,12 +37,104 @@
       return x * 2;
     }
   </script>
+  <script type="text/markdown">
+    ## Input Controls
+    Testing SetInput with all Observable Inputs types.
+  </script>
   <script id="27" type="text/x-typescript" pinned="">
     const rangeInput = Inputs.range([1, 10], {step: 1})
     const rangeValue = view(rangeInput)
   </script>
   <script id="31" type="text/markdown">
     Value is ${rangeValue}.
+  </script>
+  <script id="32" type="text/x-typescript" pinned="">
+    const selectInput = Inputs.select(['a', 'b', 'c'])
+    const selectValue = view(selectInput)
+  </script>
+  <script id="33" type="text/markdown">
+    Selected: ${selectValue}
+  </script>
+  <script id="34" type="text/x-typescript" pinned="">
+    const buttonInput = Inputs.button("Click me")
+    const buttonClicks = view(buttonInput)
+  </script>
+  <script id="35" type="text/markdown">
+    Button clicked ${buttonClicks} times.
+  </script>
+  <script id="36" type="text/x-typescript" pinned="">
+    const radioInput = Inputs.radio(['red', 'green', 'blue'], {label: "Color"})
+    const radioValue = view(radioInput)
+  </script>
+  <script id="37" type="text/markdown">
+    Radio selected: ${radioValue}
+  </script>
+  <script id="38" type="text/x-typescript" pinned="">
+    const checkboxInput = Inputs.checkbox(['apple', 'banana', 'cherry'], {label: "Fruits"})
+    const checkboxValue = view(checkboxInput)
+  </script>
+  <script id="39" type="text/markdown">
+    Checkboxes selected: ${checkboxValue}
+  </script>
+  <script id="40" type="text/x-typescript" pinned="">
+    const toggleInput = Inputs.toggle({label: "Enable feature"})
+    const toggleValue = view(toggleInput)
+  </script>
+  <script id="41" type="text/markdown">
+    Toggle is: ${toggleValue ? "ON" : "OFF"}
+  </script>
+  <script id="42" type="text/x-typescript" pinned="">
+    const numberInput = Inputs.number([0, 100], {step: 1, label: "Number"})
+    const numberValue = view(numberInput)
+  </script>
+  <script id="43" type="text/markdown">
+    Number: ${numberValue}
+  </script>
+  <script id="44" type="text/x-typescript" pinned="">
+    const textInput = Inputs.text({label: "Name", placeholder: "Enter your name"})
+    const textValue = view(textInput)
+  </script>
+  <script id="45" type="text/markdown">
+    Text: ${textValue}
+  </script>
+  <script id="46" type="text/x-typescript" pinned="">
+    const textareaInput = Inputs.textarea({label: "Description", placeholder: "Enter description"})
+    const textareaValue = view(textareaInput)
+  </script>
+  <script id="47" type="text/markdown">
+    Textarea: ${textareaValue}
+  </script>
+  <script id="48" type="text/x-typescript" pinned="">
+    const dateInput = Inputs.date({label: "Date"})
+    const dateValue = view(dateInput)
+  </script>
+  <script id="49" type="text/markdown">
+    Date: ${dateValue}
+  </script>
+  <script id="50" type="text/x-typescript" pinned="">
+    const datetimeInput = Inputs.datetime({label: "Datetime"})
+    const datetimeValue = view(datetimeInput)
+  </script>
+  <script id="51" type="text/markdown">
+    Datetime: ${datetimeValue}
+  </script>
+  <script id="52" type="text/x-typescript" pinned="">
+    const colorInput = Inputs.color({label: "Color", value: "#ff0000"})
+    const colorValue = view(colorInput)
+  </script>
+  <script id="53" type="text/markdown">
+    Color: ${colorValue}
+  </script>
+  <script id="54" type="text/x-typescript" pinned="">
+    const fileInput = Inputs.file({label: "File", accept: ".txt,.csv"})
+    const fileValue = view(fileInput)
+  </script>
+  <script id="55" type="text/markdown">
+    File: ${fileValue ? fileValue.name : "none"}
+  </script>
+  <script type="text/markdown">
+    ## Async Values
+    Testing pending and resolved promises.
   </script>
   <script id="11" type="module" pinned="">
     const asyncValue = new Promise(resolve => {
@@ -51,6 +146,10 @@
       setTimeout(() => resolve("slow resolved!"), 5000);
     });
   </script>
+  <script type="text/markdown">
+    ## Error Cases
+    Testing runtime errors and reference errors.
+  </script>
   <script id="13" type="module" pinned="">
     const runtimeError = (() => {
       throw new Error("This is a runtime error");
@@ -58,6 +157,10 @@
   </script>
   <script id="14" type="module" pinned="">
     const referenceError = undefinedVariable + 1;
+  </script>
+  <script type="text/markdown">
+    ## Visual Elements
+    Canvas, SVG, and DOM elements for testing image capture.
   </script>
   <script id="15" type="module" pinned="">
     const canvas = display((() => {
@@ -133,6 +236,10 @@
 
       return svg.node();
     })());
+  </script>
+  <script type="text/markdown">
+    ## Special Types
+    TypedArrays, Map, Set, Date, RegExp, large arrays, circular references, and functions.
   </script>
   <script id="17" type="module" pinned="">
     const typedArray = new Float32Array([1.1, 2.2, 3.3, 4.4, 5.5]);

@@ -15,18 +15,17 @@
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 
-const runtimeExposeCode = readFileSync(
-  new URL("./client/runtime-expose.js", import.meta.url),
-  "utf-8"
-);
-const earlyConsolePatch = readFileSync(
-  new URL("./client/early-console-patch.js", import.meta.url),
-  "utf-8"
-);
-const debugClientCode = readFileSync(
-  new URL("./client/debug-client.js", import.meta.url),
-  "utf-8"
-);
+// File paths for client scripts
+const CLIENT_FILES = {
+  runtimeExpose: new URL("./client/runtime-expose.js", import.meta.url),
+  earlyConsolePatch: new URL("./client/early-console-patch.js", import.meta.url),
+  debugClient: new URL("./client/debug-client.js", import.meta.url),
+};
+
+// Read client file - in dev mode, reads fresh each time for easier development
+function readClientFile(url) {
+  return readFileSync(url, "utf-8");
+}
 
 // Virtual module ID for runtime exposure (Vite will transform the imports)
 const VIRTUAL_RUNTIME_ID = "virtual:debug-notebook-runtime";
@@ -78,7 +77,7 @@ export function debugNotebook() {
     // Virtual module content
     load(id) {
       if (id === RESOLVED_VIRTUAL_RUNTIME_ID) {
-        return runtimeExposeCode;
+        return readClientFile(CLIENT_FILES.runtimeExpose);
       }
     },
 
@@ -114,6 +113,10 @@ export function debugNotebook() {
       // Read port config fresh each time (in case MCP server restarted)
       const portConfig = readPortConfig(projectRoot);
       const configScript = `window.__NOTEBOOKKIT_DEBUG_CONFIG__ = ${JSON.stringify(portConfig)};`;
+
+      // Read client files fresh each time for easier development
+      const earlyConsolePatch = readClientFile(CLIENT_FILES.earlyConsolePatch);
+      const debugClientCode = readClientFile(CLIENT_FILES.debugClient);
 
       return [
         // Early console patch - must run before anything else
