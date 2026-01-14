@@ -11,7 +11,7 @@ const options = {
   outfile: "dist/debug-client.js",
   target: ["es2020"],
   minify: false, // Keep readable for debugging
-  sourcemap: false,
+  sourcemap: true,
 };
 
 if (watch) {
