@@ -880,7 +880,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'ListValues',
-        description: 'Get list of all named values in the running notebook',
+        description: 'List all named values in the Observable runtime\'s reactive graph.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -895,7 +895,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'GetValue',
-        description: 'Get a specific value from the running notebook. Returns the value along with its state (fulfilled, pending, or rejected). Automatically returns image content for Canvas and SVG elements.',
+        description: 'Get a value from the Observable runtime by name. Returns the value along with its state (fulfilled, pending, or rejected). Automatically returns image content for Canvas and SVG elements.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -915,7 +915,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'GetValues',
-        description: 'Get multiple values from the notebook at once. If no names provided, returns all values. Useful for getting a snapshot of the entire notebook state.',
+        description: 'Get multiple values from the Observable runtime at once. If no names provided, returns all values. Useful for getting a snapshot of the runtime state.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -935,7 +935,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'GetValueMetadata',
-        description: 'Get metadata about a value including its state, type, dependencies (inputs), and dependents (outputs) without fetching the full value.',
+        description: 'Get metadata about a value in the Observable runtime including its state, type, dependencies (inputs), and dependents (outputs) without fetching the full value.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -991,8 +991,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'SetInput',
-        description: 'Set the value of an interactive input widget (e.g., Inputs.range, Inputs.select, Inputs.text). This sets the .value property and dispatches an input event, triggering reactive updates to any cells that depend on the input.',
+        name: 'SetInputValue',
+        description: 'Set the .value property of an input widget in the Observable runtime (e.g., Inputs.range, Inputs.select, Inputs.text) and dispatch an input event, triggering reactive updates to dependent values.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1041,7 +1041,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'GetDependencyGraph',
-        description: 'Get the full dependency graph of the notebook showing how values depend on each other. Returns nodes (values) and edges (dependencies).',
+        description: 'Get the dependency graph from the Observable runtime showing how values depend on each other. Returns nodes (values) and edges (dependencies).',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1080,7 +1080,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'Eval',
-        description: 'Execute arbitrary JavaScript code in the browser context. Returns the result of the expression. Useful for debugging DOM state, checking computed styles, element dimensions, etc.',
+        description: 'Execute JavaScript in the browser context. Runs outside the Observable runtime—use as a last resort when runtime-aware tools (GetValue, SetInput, DefineVariable) don\'t suffice. Useful for DOM inspection, computed styles, or browser APIs not exposed through the runtime.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1223,7 +1223,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'DefineVariable',
-        description: 'Inject an ephemeral variable into the Observable runtime. The variable participates in the reactive graph and can depend on existing notebook values. Use this to probe runtime state without modifying notebook source. Example: define "c" with expression "a + b" to compute the sum of variables a and b.',
+        description: 'Inject an ephemeral value into the Observable runtime. The value participates in the reactive graph and can depend on existing values. Prefer this over Eval when computing derived values from runtime state. Example: define "c" with expression "a + b" to compute the sum of values a and b.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1252,7 +1252,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'DeleteVariable',
-        description: 'Delete an ephemeral variable that was previously injected with DefineVariable.',
+        description: 'Delete an ephemeral value that was previously injected into the Observable runtime with DefineVariable.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1272,7 +1272,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'ListInjectedVariables',
-        description: 'List all ephemeral variables that have been injected into the runtime with DefineVariable.',
+        description: 'List all ephemeral values that have been injected into the Observable runtime with DefineVariable.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1553,7 +1553,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'SetInput') {
+    if (name === 'SetInputValue') {
       const { notebook, name: valueName, value, timeout_ms = DEFAULT_TIMEOUT } = args;
 
       if (!valueName) {
