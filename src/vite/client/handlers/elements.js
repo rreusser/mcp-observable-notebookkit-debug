@@ -2,6 +2,8 @@
  * Element content and image capture handlers
  */
 
+import { captureSVGAsImage } from "../utils/serialize.js";
+
 /**
  * Handle GetElementContent request - gets content from DOM elements
  * Supports text, HTML, canvas capture, and SVG
@@ -113,57 +115,4 @@ export async function captureElementAsImage(element) {
   // For other elements, we'd need html2canvas or similar
   // For now, return null and let the text content be used
   return null;
-}
-
-/**
- * Capture SVG element as PNG image
- */
-export async function captureSVGAsImage(svgElement) {
-  return new Promise((resolve, reject) => {
-    try {
-      // Clone the SVG to avoid modifying the original
-      const clone = svgElement.cloneNode(true);
-
-      // Get dimensions
-      const bbox = svgElement.getBoundingClientRect();
-      const width = bbox.width || svgElement.getAttribute('width') || 300;
-      const height = bbox.height || svgElement.getAttribute('height') || 150;
-
-      // Ensure the clone has dimensions
-      clone.setAttribute('width', width);
-      clone.setAttribute('height', height);
-
-      // Serialize SVG to string
-      const serializer = new XMLSerializer();
-      const svgString = serializer.serializeToString(clone);
-
-      // Create a blob and URL
-      const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-
-      // Create an image and draw to canvas
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        URL.revokeObjectURL(url);
-
-        resolve({
-          data: canvas.toDataURL('image/png').split(',')[1],
-          width: width,
-          height: height,
-        });
-      };
-      img.onerror = (err) => {
-        URL.revokeObjectURL(url);
-        reject(new Error('Failed to load SVG as image'));
-      };
-      img.src = url;
-    } catch (err) {
-      reject(err);
-    }
-  });
 }

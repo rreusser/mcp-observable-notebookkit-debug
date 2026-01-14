@@ -2,10 +2,11 @@
  * Eval request handler
  */
 
-import { serializeValue } from "../utils/serialize.js";
+import { serializeValueAsync } from "../utils/serialize.js";
 
 /**
  * Handle Eval request - execute arbitrary JavaScript code and return the result
+ * Automatically captures Canvas/SVG elements as images
  */
 export async function handleEvalRequest(client, message) {
   const { code } = message;
@@ -30,7 +31,7 @@ export async function handleEvalRequest(client, message) {
       type: "eval_response",
       requestId: message.requestId,
       success: true,
-      result: serializeValue(result),
+      result: await serializeValueAsync(result),
     });
   } catch (error) {
     client.send({

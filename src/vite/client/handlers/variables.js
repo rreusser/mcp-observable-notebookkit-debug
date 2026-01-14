@@ -3,7 +3,7 @@
  */
 
 import { getRuntimeModule, getValueState } from "../utils/runtime.js";
-import { serializeValue } from "../utils/serialize.js";
+import { serializeValueAsync } from "../utils/serialize.js";
 
 /**
  * Handle DefineVariable request - inject an ephemeral variable into the Observable runtime
@@ -72,7 +72,7 @@ export async function handleDefineVariableRequest(client, message) {
         name,
         success: true,
         state: "fulfilled",
-        value: serializeValue(result.value),
+        value: await serializeValueAsync(result.value),
         inputs: deps,
       });
     } else if (result.state === "pending") {

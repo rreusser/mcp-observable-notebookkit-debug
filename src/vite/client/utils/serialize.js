@@ -229,3 +229,102 @@ export function serializeValue(value, maxDepth, currentDepth, seen) {
     };
   }
 }
+
+/**
+ * Async serialization that handles image capture for Canvas/SVG elements.
+ * Use this when the value might be a visual element that should be captured as an image.
+ */
+export async function serializeValueAsync(value) {
+  // Handle Canvas elements
+  if (value instanceof HTMLCanvasElement) {
+    try {
+      return {
+        __type: "Canvas",
+        width: value.width,
+        height: value.height,
+        data: value.toDataURL("image/png").split(",")[1],
+      };
+    } catch (err) {
+      return {
+        __type: "Canvas",
+        width: value.width,
+        height: value.height,
+        error: "Failed to capture: " + err.message,
+      };
+    }
+  }
+
+  // Handle SVG elements
+  if (value instanceof SVGElement ||
+      (value instanceof Element && value.tagName?.toLowerCase() === "svg")) {
+    try {
+      const imageData = await captureSVGAsImage(value);
+      if (imageData) {
+        return {
+          __type: "SVG",
+          width: imageData.width,
+          height: imageData.height,
+          data: imageData.data,
+        };
+      }
+    } catch (err) {
+      // Fall through to regular serialization
+    }
+  }
+
+  // Fall back to sync serialization for everything else
+  return serializeValue(value);
+}
+
+/**
+ * Capture SVG element as PNG image
+ */
+export function captureSVGAsImage(svgElement) {
+  return new Promise((resolve, reject) => {
+    try {
+      // Clone the SVG to avoid modifying the original
+      const clone = svgElement.cloneNode(true);
+
+      // Get dimensions
+      const bbox = svgElement.getBoundingClientRect();
+      const width = bbox.width || svgElement.getAttribute("width") || 300;
+      const height = bbox.height || svgElement.getAttribute("height") || 150;
+
+      // Ensure the clone has dimensions
+      clone.setAttribute("width", width);
+      clone.setAttribute("height", height);
+
+      // Serialize SVG to string
+      const serializer = new XMLSerializer();
+      const svgString = serializer.serializeToString(clone);
+
+      // Create a blob and URL
+      const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+
+      // Create an image and draw to canvas
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+
+        resolve({
+          data: canvas.toDataURL("image/png").split(",")[1],
+          width: width,
+          height: height,
+        });
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Failed to load SVG as image"));
+      };
+      img.src = url;
+    } catch (err) {
+      reject(err);
+    }
+  });
+}

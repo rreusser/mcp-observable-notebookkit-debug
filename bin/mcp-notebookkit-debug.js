@@ -992,17 +992,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'SetInput',
-        description: 'Set the value of an input element (viewof cell) in the notebook. This triggers reactive updates to dependent cells.',
+        description: 'Set the value of an interactive input widget (e.g., Inputs.range, Inputs.select, Inputs.text). This sets the .value property and dispatches an input event, triggering reactive updates to any cells that depend on the input.',
         inputSchema: {
           type: 'object',
           properties: {
             notebook: notebookParam,
             name: {
               type: 'string',
-              description: 'Name of the input value to set (the viewof cell name)'
+              description: 'Name of the cell containing the input widget (e.g., "slider" if defined as `slider = Inputs.range([0, 100])`)'
             },
             value: {
-              description: 'The value to set'
+              description: 'The value to set (number for range, string for text/select, boolean for toggle, array of strings for checkbox)'
             },
             timeout_ms: {
               type: 'number',
@@ -1749,22 +1749,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const output = [];
-
       if (response.error) {
-        output.push(`Execution error: ${response.error}`);
+        const output = [`Execution error: ${response.error}`];
         if (response.stack) {
           output.push(`Stack:\n${response.stack.split('\n').slice(0, 5).join('\n')}`);
         }
-      } else {
-        output.push(`Result:`);
-        output.push(formatValue(response.result));
+        return {
+          content: [{
+            type: 'text',
+            text: output.join('\n')
+          }]
+        };
+      }
+
+      // Return image content block for Canvas/SVG results
+      const result = response.result;
+      if (result?.__type === 'Canvas' && result.data) {
+        return {
+          content: [
+            { type: 'text', text: `Result:\nCanvas (${result.width}x${result.height})` },
+            { type: 'image', data: result.data, mimeType: 'image/png' }
+          ]
+        };
+      }
+
+      if (result?.__type === 'SVG' && result.data) {
+        return {
+          content: [
+            { type: 'text', text: `Result:\nSVG (${result.width}x${result.height})` },
+            { type: 'image', data: result.data, mimeType: 'image/png' }
+          ]
+        };
       }
 
       return {
         content: [{
           type: 'text',
-          text: output.join('\n')
+          text: `Result:\n${formatValue(response.result)}`
         }]
       };
     }
@@ -1885,6 +1906,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       output.push(`State: ${response.state}`);
 
       if (response.state === 'fulfilled') {
+        // Return image content block for Canvas/SVG values
+        const value = response.value;
+        if (value?.__type === 'Canvas' && value.data) {
+          output.push('');
+          output.push(`Value:\nCanvas (${value.width}x${value.height})`);
+          return {
+            content: [
+              { type: 'text', text: output.join('\n') },
+              { type: 'image', data: value.data, mimeType: 'image/png' }
+            ]
+          };
+        }
+
+        if (value?.__type === 'SVG' && value.data) {
+          output.push('');
+          output.push(`Value:\nSVG (${value.width}x${value.height})`);
+          return {
+            content: [
+              { type: 'text', text: output.join('\n') },
+              { type: 'image', data: value.data, mimeType: 'image/png' }
+            ]
+          };
+        }
+
         output.push('');
         output.push('Value:');
         output.push(formatValue(response.value));

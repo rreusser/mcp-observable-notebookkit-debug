@@ -68,7 +68,7 @@ You can now use an agent like Claude Code to poke and prod at notebooks running 
 | `GetValueMetadata`        | Get metadata: state, type, dependencies, and dependents without full value  |
 | `GetErrors`               | Get all errors (DOM-reported and values in rejected state)                  |
 | `GetLogs`                 | View console logs from the current session                                  |
-| `SetInput`                | Set an input value (viewof cell) to trigger reactive updates                |
+| `SetInput`                | Set an input widget's value (e.g., `Inputs.range`) to trigger reactive updates |
 | `GetElementContent`       | Get content from a DOM element by CSS selector; captures canvas/SVG as images |
 | `GetDependencyGraph`      | Get the dependency graph showing how values depend on each other            |
 | `Eval`                    | Execute arbitrary JavaScript in the browser context                         |
@@ -143,6 +143,18 @@ DefineVariable({
 Dependencies are auto-detected from the expression. Use `ListInjectedVariables` to see all injected variables and `DeleteVariable` to remove them.
 
 Note: You cannot define a variable with the same name as an existing notebook cell.
+
+### Setting Input Values
+
+Use `SetInput` to programmatically change the value of interactive input widgets created with `Inputs.*` (e.g., `Inputs.range`, `Inputs.select`, `Inputs.text`). This sets the widget's `.value` property and dispatches an input event, triggering reactive updates to dependent cells.
+
+```javascript
+// If the notebook has: slider = Inputs.range([0, 100])
+SetInput({ name: "slider", value: 50 })
+
+// If the notebook has: dropdown = Inputs.select(["A", "B", "C"])
+SetInput({ name: "dropdown", value: "B" })
+```
 
 ### Mouse Interaction
 

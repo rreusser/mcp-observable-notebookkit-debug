@@ -265,6 +265,77 @@
       };
     }
   }
+  async function serializeValueAsync(value) {
+    if (value instanceof HTMLCanvasElement) {
+      try {
+        return {
+          __type: "Canvas",
+          width: value.width,
+          height: value.height,
+          data: value.toDataURL("image/png").split(",")[1]
+        };
+      } catch (err) {
+        return {
+          __type: "Canvas",
+          width: value.width,
+          height: value.height,
+          error: "Failed to capture: " + err.message
+        };
+      }
+    }
+    if (value instanceof SVGElement || value instanceof Element && value.tagName?.toLowerCase() === "svg") {
+      try {
+        const imageData = await captureSVGAsImage(value);
+        if (imageData) {
+          return {
+            __type: "SVG",
+            width: imageData.width,
+            height: imageData.height,
+            data: imageData.data
+          };
+        }
+      } catch (err) {
+      }
+    }
+    return serializeValue(value);
+  }
+  function captureSVGAsImage(svgElement) {
+    return new Promise((resolve, reject) => {
+      try {
+        const clone = svgElement.cloneNode(true);
+        const bbox = svgElement.getBoundingClientRect();
+        const width = bbox.width || svgElement.getAttribute("width") || 300;
+        const height = bbox.height || svgElement.getAttribute("height") || 150;
+        clone.setAttribute("width", width);
+        clone.setAttribute("height", height);
+        const serializer = new XMLSerializer();
+        const svgString = serializer.serializeToString(clone);
+        const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0);
+          URL.revokeObjectURL(url);
+          resolve({
+            data: canvas.toDataURL("image/png").split(",")[1],
+            width,
+            height
+          });
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error("Failed to load SVG as image"));
+        };
+        img.src = url;
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
 
   // src/vite/client/utils/console.js
   function patchConsole(send) {
@@ -412,122 +483,6 @@
     };
   }
 
-  // src/vite/client/handlers/elements.js
-  async function handleGetElementContentRequest(client, message) {
-    const { selector, mode = "auto" } = message;
-    try {
-      const element = document.querySelector(selector);
-      if (!element) {
-        client.send({
-          type: "elementcontent_response",
-          requestId: message.requestId,
-          selector,
-          success: false,
-          error: `No element found matching selector: ${selector}`
-        });
-        return;
-      }
-      const tagName = element.tagName.toLowerCase();
-      const response = {
-        type: "elementcontent_response",
-        requestId: message.requestId,
-        selector,
-        success: true,
-        tagName
-      };
-      const isCanvas = element instanceof HTMLCanvasElement;
-      const isSVG = element instanceof SVGElement || tagName === "svg";
-      const isImage = element instanceof HTMLImageElement;
-      const shouldCaptureImage = mode === "image" || mode === "auto" && (isCanvas || isSVG);
-      const shouldGetText = mode === "text" || mode === "auto" && !isCanvas && !isSVG;
-      const shouldGetHTML = mode === "html";
-      if (isCanvas) response.elementType = "canvas";
-      else if (isSVG) response.elementType = "svg";
-      else if (isImage) response.elementType = "image";
-      else response.elementType = "element";
-      if (shouldCaptureImage) {
-        try {
-          const imageData = await captureElementAsImage(element);
-          if (imageData) {
-            response.imageData = imageData.data;
-            response.width = imageData.width;
-            response.height = imageData.height;
-          }
-        } catch (err) {
-          response.captureError = err.message;
-        }
-      }
-      if (isSVG && mode !== "image") {
-        response.svgSource = element.outerHTML;
-      }
-      if (shouldGetText || mode === "auto") {
-        response.textContent = element.textContent?.trim() || "";
-      }
-      if (shouldGetHTML) {
-        response.innerHTML = element.innerHTML;
-      }
-      client.send(response);
-    } catch (error) {
-      client.send({
-        type: "elementcontent_response",
-        requestId: message.requestId,
-        selector,
-        success: false,
-        error: error.message
-      });
-    }
-  }
-  async function captureElementAsImage(element) {
-    if (element instanceof HTMLCanvasElement) {
-      return {
-        data: element.toDataURL("image/png").split(",")[1],
-        width: element.width,
-        height: element.height
-      };
-    }
-    if (element instanceof SVGElement || element.tagName.toLowerCase() === "svg") {
-      return await captureSVGAsImage(element);
-    }
-    return null;
-  }
-  async function captureSVGAsImage(svgElement) {
-    return new Promise((resolve, reject) => {
-      try {
-        const clone = svgElement.cloneNode(true);
-        const bbox = svgElement.getBoundingClientRect();
-        const width = bbox.width || svgElement.getAttribute("width") || 300;
-        const height = bbox.height || svgElement.getAttribute("height") || 150;
-        clone.setAttribute("width", width);
-        clone.setAttribute("height", height);
-        const serializer = new XMLSerializer();
-        const svgString = serializer.serializeToString(clone);
-        const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          ctx.drawImage(img, 0, 0);
-          URL.revokeObjectURL(url);
-          resolve({
-            data: canvas.toDataURL("image/png").split(",")[1],
-            width,
-            height
-          });
-        };
-        img.onerror = (err) => {
-          URL.revokeObjectURL(url);
-          reject(new Error("Failed to load SVG as image"));
-        };
-        img.src = url;
-      } catch (err) {
-        reject(err);
-      }
-    });
-  }
-
   // src/vite/client/handlers/values.js
   async function handleGetValueRequest(client, message) {
     const runtime = getRuntimeModule();
@@ -544,26 +499,7 @@
     }
     const result = await getValueState(runtime, name, message.timeout || 5e3);
     if (result.state === "fulfilled") {
-      let serializedValue = result.value;
-      if (result.value instanceof SVGElement || result.value instanceof Element && result.value.tagName?.toLowerCase() === "svg") {
-        try {
-          const imageData = await captureSVGAsImage(result.value);
-          if (imageData) {
-            serializedValue = {
-              __type: "SVG",
-              width: imageData.width,
-              height: imageData.height,
-              data: imageData.data
-            };
-          } else {
-            serializedValue = serializeValue(result.value);
-          }
-        } catch (err) {
-          serializedValue = serializeValue(result.value);
-        }
-      } else {
-        serializedValue = serializeValue(result.value);
-      }
+      const serializedValue = await serializeValueAsync(result.value);
       client.send({
         type: "value_response",
         requestId: message.requestId,
@@ -913,6 +849,85 @@
     }
   }
 
+  // src/vite/client/handlers/elements.js
+  async function handleGetElementContentRequest(client, message) {
+    const { selector, mode = "auto" } = message;
+    try {
+      const element = document.querySelector(selector);
+      if (!element) {
+        client.send({
+          type: "elementcontent_response",
+          requestId: message.requestId,
+          selector,
+          success: false,
+          error: `No element found matching selector: ${selector}`
+        });
+        return;
+      }
+      const tagName = element.tagName.toLowerCase();
+      const response = {
+        type: "elementcontent_response",
+        requestId: message.requestId,
+        selector,
+        success: true,
+        tagName
+      };
+      const isCanvas = element instanceof HTMLCanvasElement;
+      const isSVG = element instanceof SVGElement || tagName === "svg";
+      const isImage = element instanceof HTMLImageElement;
+      const shouldCaptureImage = mode === "image" || mode === "auto" && (isCanvas || isSVG);
+      const shouldGetText = mode === "text" || mode === "auto" && !isCanvas && !isSVG;
+      const shouldGetHTML = mode === "html";
+      if (isCanvas) response.elementType = "canvas";
+      else if (isSVG) response.elementType = "svg";
+      else if (isImage) response.elementType = "image";
+      else response.elementType = "element";
+      if (shouldCaptureImage) {
+        try {
+          const imageData = await captureElementAsImage(element);
+          if (imageData) {
+            response.imageData = imageData.data;
+            response.width = imageData.width;
+            response.height = imageData.height;
+          }
+        } catch (err) {
+          response.captureError = err.message;
+        }
+      }
+      if (isSVG && mode !== "image") {
+        response.svgSource = element.outerHTML;
+      }
+      if (shouldGetText || mode === "auto") {
+        response.textContent = element.textContent?.trim() || "";
+      }
+      if (shouldGetHTML) {
+        response.innerHTML = element.innerHTML;
+      }
+      client.send(response);
+    } catch (error) {
+      client.send({
+        type: "elementcontent_response",
+        requestId: message.requestId,
+        selector,
+        success: false,
+        error: error.message
+      });
+    }
+  }
+  async function captureElementAsImage(element) {
+    if (element instanceof HTMLCanvasElement) {
+      return {
+        data: element.toDataURL("image/png").split(",")[1],
+        width: element.width,
+        height: element.height
+      };
+    }
+    if (element instanceof SVGElement || element.tagName.toLowerCase() === "svg") {
+      return await captureSVGAsImage(element);
+    }
+    return null;
+  }
+
   // src/vite/client/handlers/graph.js
   async function handleGetDependencyGraphRequest(client, message) {
     const runtime = getRuntimeModule();
@@ -1068,7 +1083,7 @@
         type: "eval_response",
         requestId: message.requestId,
         success: true,
-        result: serializeValue(result)
+        result: await serializeValueAsync(result)
       });
     } catch (error) {
       client.send({
@@ -1128,7 +1143,7 @@
           name,
           success: true,
           state: "fulfilled",
-          value: serializeValue(result.value),
+          value: await serializeValueAsync(result.value),
           inputs: deps
         });
       } else if (result.state === "pending") {

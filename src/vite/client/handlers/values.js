@@ -3,12 +3,11 @@
  */
 
 import { getRuntimeModule, getValueState, getVariableMetadata, getValueTypeHint } from "../utils/runtime.js";
-import { serializeValue } from "../utils/serialize.js";
-import { captureSVGAsImage } from "./elements.js";
+import { serializeValue, serializeValueAsync } from "../utils/serialize.js";
 
 /**
  * Handle GetValue request - returns value with state info
- * Automatically captures SVG elements as images
+ * Automatically captures Canvas/SVG elements as images
  */
 export async function handleGetValueRequest(client, message) {
   const runtime = getRuntimeModule();
@@ -28,30 +27,7 @@ export async function handleGetValueRequest(client, message) {
   const result = await getValueState(runtime, name, message.timeout || 5000);
 
   if (result.state === "fulfilled") {
-    let serializedValue = result.value;
-
-    // Check if the value is an SVG element and capture it as an image
-    if (result.value instanceof SVGElement ||
-        (result.value instanceof Element && result.value.tagName?.toLowerCase() === 'svg')) {
-      try {
-        const imageData = await captureSVGAsImage(result.value);
-        if (imageData) {
-          serializedValue = {
-            __type: "SVG",
-            width: imageData.width,
-            height: imageData.height,
-            data: imageData.data,
-          };
-        } else {
-          serializedValue = serializeValue(result.value);
-        }
-      } catch (err) {
-        // Fall back to regular serialization if capture fails
-        serializedValue = serializeValue(result.value);
-      }
-    } else {
-      serializedValue = serializeValue(result.value);
-    }
+    const serializedValue = await serializeValueAsync(result.value);
 
     client.send({
       type: "value_response",
