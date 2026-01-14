@@ -37,7 +37,7 @@
       return x * 2;
     }
   </script>
-  <script type="text/markdown">
+  <script id="11" type="text/markdown">
     ## Input Controls
     Testing SetInput with all Observable Inputs types.
   </script>
@@ -132,11 +132,11 @@
   <script id="55" type="text/markdown">
     File: ${fileValue ? fileValue.name : "none"}
   </script>
-  <script type="text/markdown">
+  <script id="56" type="text/markdown">
     ## Async Values
     Testing pending and resolved promises.
   </script>
-  <script id="11" type="module" pinned="">
+  <script id="57" type="module" pinned="">
     const asyncValue = new Promise(resolve => {
       setTimeout(() => resolve("async resolved!"), 100);
     });
@@ -146,7 +146,7 @@
       setTimeout(() => resolve("slow resolved!"), 5000);
     });
   </script>
-  <script type="text/markdown">
+  <script id="58" type="text/markdown">
     ## Error Cases
     Testing runtime errors and reference errors.
   </script>
@@ -158,11 +158,11 @@
   <script id="14" type="module" pinned="">
     const referenceError = undefinedVariable + 1;
   </script>
-  <script type="text/markdown">
+  <script id="59" type="text/markdown">
     ## Visual Elements
     Canvas, SVG, and DOM elements for testing image capture.
   </script>
-  <script id="15" type="module" pinned="">
+  <script id="15" type="module">
     const canvas = display((() => {
       const c = document.createElement("canvas");
       c.width = 200;
@@ -176,7 +176,7 @@
       return c;
     })());
   </script>
-  <script id="16" type="module" pinned="">
+  <script id="16" type="module">
     const element = (() => {
       const div = document.createElement("div");
       div.id = "test-element";
@@ -185,7 +185,7 @@
       return div;
     })();
   </script>
-  <script id="26" type="module" pinned="">
+  <script id="26" type="module">
     // Plain SVG created with DOM APIs
     const plainSvg = display((() => {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -212,7 +212,7 @@
       return svg;
     })());
   </script>
-  <script id="28" type="module" pinned="">
+  <script id="28" type="module">
     // SVG created with d3
     const d3Svg = display((() => {
       const svg = d3.create("svg")
@@ -237,7 +237,7 @@
       return svg.node();
     })());
   </script>
-  <script type="text/markdown">
+  <script id="60" type="text/markdown">
     ## Special Types
     TypedArrays, Map, Set, Date, RegExp, large arrays, circular references, and functions.
   </script>
@@ -278,14 +278,10 @@
       return "async result";
     }
   </script>
-
-  <!-- Dependency chain examples -->
   <script id="100" type="text/markdown">
     ## Dependency Chain Examples
     The following cells demonstrate various dependency patterns.
   </script>
-
-  <!-- Linear chain: base → derived1 → derived2 → derived3 -->
   <script id="101" type="module" pinned="">
     const chainBase = 10;
   </script>
@@ -298,8 +294,6 @@
   <script id="104" type="module" pinned="">
     const chainDerived3 = chainDerived2 * chainDerived2;
   </script>
-
-  <!-- Diamond pattern: diamondTop → (diamondLeft, diamondRight) → diamondBottom -->
   <script id="110" type="module" pinned="">
     const diamondTop = 100;
   </script>
@@ -312,8 +306,6 @@
   <script id="113" type="module" pinned="">
     const diamondBottom = diamondLeft + diamondRight;
   </script>
-
-  <!-- Fan-out: fanSource → (fanA, fanB, fanC, fanD) -->
   <script id="120" type="module" pinned="">
     const fanSource = { x: 1, y: 2, z: 3 };
   </script>
@@ -329,8 +321,6 @@
   <script id="124" type="module" pinned="">
     const fanD = fanSource.x + fanSource.y + fanSource.z;
   </script>
-
-  <!-- Fan-in: (inputA, inputB, inputC) → aggregated -->
   <script id="130" type="module" pinned="">
     const inputA = "Hello";
   </script>
@@ -343,8 +333,6 @@
   <script id="133" type="module" pinned="">
     const aggregated = inputA + inputB + inputC;
   </script>
-
-  <!-- Mixed: combines multiple patterns -->
   <script id="140" type="module" pinned="">
     const mixedRoot = 5;
   </script>
@@ -359,5 +347,150 @@
   </script>
   <script id="144" type="module" pinned="">
     const mixedFinal = mixedMerge + diamondBottom;
+  </script>
+  <script id="200" type="text/markdown">
+    ## Mouse and Keyboard Interaction Tests
+    Interactive elements for testing SendKeys, MouseClick, MouseDrag, and MouseWheel.
+  </script>
+  <script id="201" type="module">
+    const keyboardTest = display((() => {
+      const container = document.createElement("div");
+      container.id = "keyboard-test";
+      container.innerHTML = `
+        <div style="margin-bottom: 8px; font-weight: bold;">Keyboard Test</div>
+        <input type="text" id="keyboard-input" placeholder="Type here or use SendKeys..."
+               style="padding: 8px; width: 300px; border: 1px solid #ccc; border-radius: 4px;" />
+        <div id="keyboard-log" style="margin-top: 8px; font-family: monospace; font-size: 12px; color: #666;">
+          Last key: (none)
+        </div>
+      `;
+      const input = container.querySelector("#keyboard-input");
+      const log = container.querySelector("#keyboard-log");
+      input.addEventListener("keydown", (e) => {
+        log.textContent = `Last key: ${e.key} (code: ${e.code}, keyCode: ${e.keyCode})`;
+      });
+      return container;
+    })());
+  </script>
+  <script id="202" type="module">
+    const clickTest = display((() => {
+      const container = document.createElement("div");
+      container.id = "click-test";
+      let clickCount = 0;
+      container.innerHTML = `
+        <div style="margin-bottom: 8px; font-weight: bold;">Mouse Click Test</div>
+        <div id="click-target" style="width: 200px; height: 100px; background: #3b82f6; color: white;
+             display: flex; align-items: center; justify-content: center; border-radius: 8px;
+             cursor: pointer; user-select: none; font-size: 18px;">
+          Click me!
+        </div>
+        <div id="click-log" style="margin-top: 8px; font-family: monospace; font-size: 12px; color: #666;">
+          Clicks: 0 | Last position: (-, -)
+        </div>
+      `;
+      const target = container.querySelector("#click-target");
+      const log = container.querySelector("#click-log");
+      target.addEventListener("click", (e) => {
+        clickCount++;
+        const rect = target.getBoundingClientRect();
+        const relX = Math.round(e.clientX - rect.left);
+        const relY = Math.round(e.clientY - rect.top);
+        target.textContent = `Clicked ${clickCount}x`;
+        log.textContent = `Clicks: ${clickCount} | Last position: (${relX}, ${relY})`;
+      });
+      return container;
+    })());
+  </script>
+  <script id="203" type="module">
+    const dragTest = display((() => {
+      const container = document.createElement("div");
+      container.id = "drag-test";
+      container.innerHTML = `
+        <div style="margin-bottom: 8px; font-weight: bold;">Mouse Drag Test</div>
+        <div id="drag-area" style="width: 300px; height: 150px; background: #f0f0f0; border: 2px dashed #ccc;
+             border-radius: 8px; position: relative; overflow: hidden;">
+          <div id="drag-target" style="width: 60px; height: 60px; background: #10b981; border-radius: 8px;
+               position: absolute; left: 20px; top: 45px; cursor: grab; display: flex;
+               align-items: center; justify-content: center; color: white; font-size: 12px;">
+            Drag
+          </div>
+        </div>
+        <div id="drag-log" style="margin-top: 8px; font-family: monospace; font-size: 12px; color: #666;">
+          Position: (20, 45) | Dragging: no
+        </div>
+      `;
+      const area = container.querySelector("#drag-area");
+      const target = container.querySelector("#drag-target");
+      const log = container.querySelector("#drag-log");
+      let isDragging = false;
+      let startX, startY, startLeft, startTop;
+
+      target.addEventListener("mousedown", (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        startLeft = target.offsetLeft;
+        startTop = target.offsetTop;
+        target.style.cursor = "grabbing";
+        log.textContent = `Position: (${startLeft}, ${startTop}) | Dragging: yes`;
+        e.preventDefault();
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+        const newLeft = Math.max(0, Math.min(240, startLeft + dx));
+        const newTop = Math.max(0, Math.min(90, startTop + dy));
+        target.style.left = newLeft + "px";
+        target.style.top = newTop + "px";
+        log.textContent = `Position: (${newLeft}, ${Math.round(newTop)}) | Dragging: yes`;
+      });
+
+      window.addEventListener("mouseup", () => {
+        if (isDragging) {
+          isDragging = false;
+          target.style.cursor = "grab";
+          const left = target.offsetLeft;
+          const top = target.offsetTop;
+          log.textContent = `Position: (${left}, ${top}) | Dragging: no`;
+        }
+      });
+
+      return container;
+    })());
+  </script>
+  <script id="204" type="module">
+    const wheelTest = display((() => {
+      const container = document.createElement("div");
+      container.id = "wheel-test";
+      let scale = 1;
+      let totalDeltaY = 0;
+      container.innerHTML = `
+        <div style="margin-bottom: 8px; font-weight: bold;">Mouse Wheel Test</div>
+        <div id="wheel-area" style="width: 200px; height: 100px; background: #8b5cf6; border-radius: 8px;
+             display: flex; align-items: center; justify-content: center; overflow: hidden;">
+          <div id="wheel-target" style="color: white; font-size: 18px; transition: transform 0.1s;">
+            Scroll here
+          </div>
+        </div>
+        <div id="wheel-log" style="margin-top: 8px; font-family: monospace; font-size: 12px; color: #666;">
+          Scale: 1.00 | Total deltaY: 0
+        </div>
+      `;
+      const area = container.querySelector("#wheel-area");
+      const target = container.querySelector("#wheel-target");
+      const log = container.querySelector("#wheel-log");
+
+      area.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        totalDeltaY += e.deltaY;
+        scale = Math.max(0.5, Math.min(2, scale - e.deltaY * 0.001));
+        target.style.transform = `scale(${scale})`;
+        log.textContent = `Scale: ${scale.toFixed(2)} | Total deltaY: ${Math.round(totalDeltaY)}`;
+      });
+
+      return container;
+    })());
   </script>
 </notebook>

@@ -12,6 +12,7 @@ import { handleGetDependencyGraphRequest } from "./handlers/graph.js";
 import { handleEvalRequest } from "./handlers/eval.js";
 import { handleDefineVariableRequest, handleDeleteVariableRequest, handleListInjectedVariablesRequest } from "./handlers/variables.js";
 import { handleMouseClickRequest, handleMouseDragRequest, handleMouseWheelRequest } from "./handlers/mouse.js";
+import { handleSendKeysRequest } from "./handlers/keyboard.js";
 
 const RECONNECT_INTERVAL = 2000;
 const SESSION_TIMEOUT = 5000;
@@ -219,6 +220,11 @@ export class DebugClient {
 
     if (message.type === "MouseWheel") {
       handleMouseWheelRequest(this, message);
+      return;
+    }
+
+    if (message.type === "SendKeys") {
+      handleSendKeysRequest(this, message);
       return;
     }
   }

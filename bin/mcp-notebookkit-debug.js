@@ -287,8 +287,8 @@ function handleBrowserMessage(message, ws) {
       type === 'errors_response' || type === 'setinput_response' ||
       type === 'elementcontent_response' || type === 'dependencygraph_response' ||
       type === 'eval_response' || type === 'mouse_response' ||
-      type === 'define_response' || type === 'delete_response' ||
-      type === 'injected_list_response') {
+      type === 'keyboard_response' || type === 'define_response' ||
+      type === 'delete_response' || type === 'injected_list_response') {
     const pending = pendingRequests.get(requestId);
     if (pending) {
       clearTimeout(pending.timer);
@@ -543,6 +543,13 @@ async function requestMouseDrag(params, timeout = DEFAULT_TIMEOUT, notebook = nu
  */
 async function requestMouseWheel(params, timeout = DEFAULT_TIMEOUT, notebook = null) {
   return createRequest('MouseWheel', params, timeout, notebook);
+}
+
+/**
+ * Request keyboard input in browser
+ */
+async function requestSendKeys(keys, selector, modifiers, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('SendKeys', { keys, selector, modifiers }, timeout, notebook);
 }
 
 /**
@@ -1222,6 +1229,40 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
+        name: 'SendKeys',
+        description: 'Simulate keyboard input. Dispatches keydown, keypress (for printable characters), and keyup events to the target element.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            keys: {
+              type: 'string',
+              description: 'Keys to send. Plain characters are sent as-is. Special keys use braces: {Enter}, {Tab}, {Escape}, {Backspace}, {Delete}, {ArrowUp}, {ArrowDown}, {ArrowLeft}, {ArrowRight}, {Space}, {Home}, {End}, {F1}-{F12}. Modifier combos: {Ctrl+a}, {Shift+Tab}, {Meta+s}.'
+            },
+            selector: {
+              type: 'string',
+              description: 'CSS selector for target element. If not provided, sends to the currently focused element.'
+            },
+            modifiers: {
+              type: 'object',
+              description: 'Modifier keys to hold during all keystrokes',
+              properties: {
+                ctrlKey: { type: 'boolean', description: 'Hold Ctrl key' },
+                altKey: { type: 'boolean', description: 'Hold Alt key' },
+                shiftKey: { type: 'boolean', description: 'Hold Shift key' },
+                metaKey: { type: 'boolean', description: 'Hold Meta/Cmd key' }
+              }
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          },
+          required: ['keys']
+        }
+      },
+      {
         name: 'DefineVariable',
         description: 'Inject an ephemeral value into the Observable runtime. The value participates in the reactive graph and can depend on existing values. Prefer this over Eval when computing derived values from runtime state. Example: define "c" with expression "a + b" to compute the sum of values a and b.',
         inputSchema: {
@@ -1864,6 +1905,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{
           type: 'text',
           text: `Scrolled (deltaX: ${deltaX}, deltaY: ${deltaY}) at (${response.clientX}, ${response.clientY})${selector ? ` on ${selector}` : ''}`
+        }]
+      };
+    }
+
+    if (name === 'SendKeys') {
+      const { notebook, keys, selector, modifiers, timeout_ms = DEFAULT_TIMEOUT } = args;
+
+      if (!keys) {
+        return {
+          content: [{ type: 'text', text: 'Error: keys is required' }],
+          isError: true
+        };
+      }
+
+      const response = await requestSendKeys(keys, selector, modifiers, timeout_ms, notebook);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: `Sent ${response.keysSent} key(s) to ${response.target}${selector ? ` (${selector})` : ''}`
         }]
       };
     }

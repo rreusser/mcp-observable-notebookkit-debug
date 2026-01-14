@@ -85,6 +85,7 @@ These tools interact with the browser/DOM context, outside the Observable runtim
 | `MouseClick`              | Simulate a mouse click at a position or on an element                       |
 | `MouseDrag`               | Simulate a mouse drag from start to end position                            |
 | `MouseWheel`              | Simulate a mouse wheel scroll at a position                                 |
+| `SendKeys`                | Simulate keyboard input to an element                                       |
 
 ### Session Tools
 
@@ -183,6 +184,33 @@ Simulate mouse events for testing interactive visualizations:
 - **`MouseWheel`**: Scroll at a position with deltaX/deltaY
 
 All mouse tools accept an optional `selector` parameter to target a specific element, with coordinates relative to that element.
+
+### Keyboard Interaction
+
+Use `SendKeys` to simulate keyboard input:
+
+```javascript
+// Type plain text
+SendKeys({ keys: "hello world" })
+
+// Use special keys with braces
+SendKeys({ keys: "{Enter}" })
+SendKeys({ keys: "{Tab}" })
+SendKeys({ keys: "{ArrowDown}" })
+
+// Modifier combinations
+SendKeys({ keys: "{Ctrl+a}" })  // Select all
+SendKeys({ keys: "{Ctrl+c}" })  // Copy
+SendKeys({ keys: "{Shift+Tab}" })  // Reverse tab
+
+// Target a specific element
+SendKeys({ selector: "#my-input", keys: "typed text{Enter}" })
+
+// Hold modifiers for all keys
+SendKeys({ keys: "abc", modifiers: { shiftKey: true } })  // Types "ABC"
+```
+
+Supported special keys: `{Enter}`, `{Tab}`, `{Escape}`, `{Backspace}`, `{Delete}`, `{Space}`, `{ArrowUp}`, `{ArrowDown}`, `{ArrowLeft}`, `{ArrowRight}`, `{Home}`, `{End}`, `{PageUp}`, `{PageDown}`, `{F1}`-`{F12}`.
 
 ## License
 
