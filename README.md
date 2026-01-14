@@ -58,19 +58,26 @@ You can now use an agent like Claude Code to poke and prod at notebooks running 
 
 ## MCP Tools
 
-| Tool                 | Description                                                                 |
-| -------------------- | --------------------------------------------------------------------------- |
-| `ListNotebooks`      | List all connected notebooks (use when multiple notebooks are open)         |
-| `Refresh`            | Refresh the page and wait for notebook initialization                       |
-| `ListValues`         | List all named values in the notebook                                       |
-| `GetValue`           | Get a specific value with its state; returns images for Canvas/SVG elements |
-| `GetValues`          | Get multiple/all values at once (snapshot of notebook state)                |
-| `GetValueMetadata`   | Get metadata: state, type, dependencies, and dependents without full value  |
-| `GetErrors`          | Get all errors (DOM-reported and values in rejected state)                  |
-| `GetLogs`            | View console logs from the current session                                  |
-| `SetInput`           | Set an input value (viewof cell) to trigger reactive updates                |
-| `GetElementContent`  | Get content from a DOM element by CSS selector; captures canvas/SVG as images |
-| `GetDependencyGraph` | Get the dependency graph showing how values depend on each other            |
+| Tool                      | Description                                                                 |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `ListNotebooks`           | List all connected notebooks (use when multiple notebooks are open)         |
+| `Refresh`                 | Refresh the page and wait for notebook initialization                       |
+| `ListValues`              | List all named values in the notebook                                       |
+| `GetValue`                | Get a specific value with its state; returns images for Canvas/SVG elements |
+| `GetValues`               | Get multiple/all values at once (snapshot of notebook state)                |
+| `GetValueMetadata`        | Get metadata: state, type, dependencies, and dependents without full value  |
+| `GetErrors`               | Get all errors (DOM-reported and values in rejected state)                  |
+| `GetLogs`                 | View console logs from the current session                                  |
+| `SetInput`                | Set an input value (viewof cell) to trigger reactive updates                |
+| `GetElementContent`       | Get content from a DOM element by CSS selector; captures canvas/SVG as images |
+| `GetDependencyGraph`      | Get the dependency graph showing how values depend on each other            |
+| `Eval`                    | Execute arbitrary JavaScript in the browser context                         |
+| `DefineVariable`          | Inject an ephemeral variable into the Observable runtime                    |
+| `DeleteVariable`          | Delete an injected ephemeral variable                                       |
+| `ListInjectedVariables`   | List all ephemeral variables injected into the runtime                      |
+| `MouseClick`              | Simulate a mouse click at a position or on an element                       |
+| `MouseDrag`               | Simulate a mouse drag from start to end position                            |
+| `MouseWheel`              | Simulate a mouse wheel scroll at a position                                 |
 
 ### Multi-Notebook Support
 
@@ -110,6 +117,42 @@ The `GetValue` and `GetValues` tools return state information along with the val
 - **SVG elements**: Rendered to canvas and captured as PNG
 
 No need to save to files - images are returned directly in the MCP response.
+
+### Ephemeral Variables
+
+Use `DefineVariable` to inject temporary variables into the Observable runtime for debugging and exploration. These variables participate in the reactive graph and can depend on existing notebook values.
+
+```javascript
+// Define a variable that computes from existing values
+DefineVariable({
+  name: "myVar",
+  expression: "number * 2 + chainBase"
+})
+
+// Use an IIFE for multi-statement expressions
+DefineVariable({
+  name: "complex",
+  expression: `(() => {
+    const doubled = number * 2;
+    const added = doubled + chainBase;
+    return { doubled, added };
+  })()`
+})
+```
+
+Dependencies are auto-detected from the expression. Use `ListInjectedVariables` to see all injected variables and `DeleteVariable` to remove them.
+
+Note: You cannot define a variable with the same name as an existing notebook cell.
+
+### Mouse Interaction
+
+Simulate mouse events for testing interactive visualizations:
+
+- **`MouseClick`**: Click at coordinates or on an element (supports left/middle/right buttons)
+- **`MouseDrag`**: Drag from start to end position with configurable duration
+- **`MouseWheel`**: Scroll at a position with deltaX/deltaY
+
+All mouse tools accept an optional `selector` parameter to target a specific element, with coordinates relative to that element.
 
 ## License
 

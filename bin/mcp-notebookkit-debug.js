@@ -286,7 +286,9 @@ function handleBrowserMessage(message, ws) {
       type === 'cell_value_response' || type === 'cells_list_response' ||
       type === 'errors_response' || type === 'setinput_response' ||
       type === 'elementcontent_response' || type === 'dependencygraph_response' ||
-      type === 'eval_response') {
+      type === 'eval_response' || type === 'mouse_response' ||
+      type === 'define_response' || type === 'delete_response' ||
+      type === 'injected_list_response') {
     const pending = pendingRequests.get(requestId);
     if (pending) {
       clearTimeout(pending.timer);
@@ -520,6 +522,48 @@ async function requestDependencyGraph(filters = {}, timeout = DEFAULT_TIMEOUT, n
  */
 async function requestEval(code, timeout = DEFAULT_TIMEOUT, notebook = null) {
   return createRequest('Eval', { code }, timeout, notebook);
+}
+
+/**
+ * Request mouse click in browser
+ */
+async function requestMouseClick(params, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('MouseClick', params, timeout, notebook);
+}
+
+/**
+ * Request mouse drag in browser
+ */
+async function requestMouseDrag(params, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('MouseDrag', params, timeout, notebook);
+}
+
+/**
+ * Request mouse wheel in browser
+ */
+async function requestMouseWheel(params, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('MouseWheel', params, timeout, notebook);
+}
+
+/**
+ * Request to define an ephemeral variable in the runtime
+ */
+async function requestDefineVariable(name, inputs, expression, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('DefineVariable', { name, inputs, expression }, timeout, notebook);
+}
+
+/**
+ * Request to delete an injected variable
+ */
+async function requestDeleteVariable(name, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('DeleteVariable', { name }, timeout, notebook);
+}
+
+/**
+ * Request list of injected variables
+ */
+async function requestListInjectedVariables(timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('ListInjectedVariables', {}, timeout, notebook);
 }
 
 /**
@@ -1053,6 +1097,193 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ['code']
         }
+      },
+      {
+        name: 'MouseClick',
+        description: 'Simulate a mouse click at a position. Can target a specific element or coordinates.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            selector: {
+              type: 'string',
+              description: 'CSS selector for target element. If provided, position is relative to element.'
+            },
+            x: {
+              type: 'number',
+              description: 'X coordinate (relative to element if selector provided, otherwise viewport)'
+            },
+            y: {
+              type: 'number',
+              description: 'Y coordinate (relative to element if selector provided, otherwise viewport)'
+            },
+            button: {
+              type: 'number',
+              description: 'Mouse button (0=left, 1=middle, 2=right). Default: 0',
+              default: 0
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          }
+        }
+      },
+      {
+        name: 'MouseDrag',
+        description: 'Simulate a mouse drag from start to end position. Emits mousedown, mousemove events per animation frame, then mouseup.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            selector: {
+              type: 'string',
+              description: 'CSS selector for target element. If provided, positions are relative to element.'
+            },
+            startX: {
+              type: 'number',
+              description: 'Starting X coordinate',
+              default: 0
+            },
+            startY: {
+              type: 'number',
+              description: 'Starting Y coordinate',
+              default: 0
+            },
+            endX: {
+              type: 'number',
+              description: 'Ending X coordinate',
+              default: 0
+            },
+            endY: {
+              type: 'number',
+              description: 'Ending Y coordinate',
+              default: 0
+            },
+            duration: {
+              type: 'number',
+              description: 'Duration of drag in milliseconds. Default: 300',
+              default: 300
+            },
+            button: {
+              type: 'number',
+              description: 'Mouse button (0=left, 1=middle, 2=right). Default: 0',
+              default: 0
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          }
+        }
+      },
+      {
+        name: 'MouseWheel',
+        description: 'Simulate a mouse wheel scroll at a position.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            selector: {
+              type: 'string',
+              description: 'CSS selector for target element. If provided, position is relative to element.'
+            },
+            x: {
+              type: 'number',
+              description: 'X coordinate (relative to element if selector provided, otherwise viewport)'
+            },
+            y: {
+              type: 'number',
+              description: 'Y coordinate (relative to element if selector provided, otherwise viewport)'
+            },
+            duration: {
+              type: 'number',
+              description: 'Duration of scroll animation in milliseconds. Default: 300',
+              default: 300
+            },
+            deltaX: {
+              type: 'number',
+              description: 'Horizontal scroll amount. Default: 0',
+              default: 0
+            },
+            deltaY: {
+              type: 'number',
+              description: 'Vertical scroll amount (positive = scroll down). Default: 0',
+              default: 0
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          }
+        }
+      },
+      {
+        name: 'DefineVariable',
+        description: 'Inject an ephemeral variable into the Observable runtime. The variable participates in the reactive graph and can depend on existing notebook values. Use this to probe runtime state without modifying notebook source. Example: define "c" with expression "a + b" to compute the sum of variables a and b.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            name: {
+              type: 'string',
+              description: 'Name for the new variable'
+            },
+            expression: {
+              type: 'string',
+              description: 'JavaScript expression to compute the value. Can reference other notebook variables.'
+            },
+            inputs: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Explicit list of dependencies (variable names). If omitted, dependencies are auto-detected from the expression.'
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait for the value to resolve',
+              default: DEFAULT_TIMEOUT
+            }
+          },
+          required: ['name', 'expression']
+        }
+      },
+      {
+        name: 'DeleteVariable',
+        description: 'Delete an ephemeral variable that was previously injected with DefineVariable.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            name: {
+              type: 'string',
+              description: 'Name of the injected variable to delete'
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          },
+          required: ['name']
+        }
+      },
+      {
+        name: 'ListInjectedVariables',
+        description: 'List all ephemeral variables that have been injected into the runtime with DefineVariable.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          }
+        }
       }
     ]
   };
@@ -1534,6 +1765,198 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{
           type: 'text',
           text: output.join('\n')
+        }]
+      };
+    }
+
+    if (name === 'MouseClick') {
+      const { notebook, selector, x = 0, y = 0, button = 0, timeout_ms = DEFAULT_TIMEOUT } = args;
+
+      const response = await requestMouseClick({ selector, x, y, button }, timeout_ms, notebook);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: `Clicked at (${response.clientX}, ${response.clientY})${selector ? ` on ${selector}` : ''}`
+        }]
+      };
+    }
+
+    if (name === 'MouseDrag') {
+      const {
+        notebook,
+        selector,
+        startX = 0,
+        startY = 0,
+        endX = 0,
+        endY = 0,
+        duration = 300,
+        button = 0,
+        timeout_ms = DEFAULT_TIMEOUT
+      } = args;
+
+      const response = await requestMouseDrag(
+        { selector, startX, startY, endX, endY, duration, button },
+        Math.max(timeout_ms, duration + 1000),  // Ensure timeout > duration
+        notebook
+      );
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: `Dragged from (${response.startClientX}, ${response.startClientY}) to (${response.endClientX}, ${response.endClientY}) over ${response.actualDuration}ms (${response.moveCount} move events)${selector ? ` on ${selector}` : ''}`
+        }]
+      };
+    }
+
+    if (name === 'MouseWheel') {
+      const { notebook, selector, x = 0, y = 0, duration = 300, deltaX = 0, deltaY = 0, timeout_ms = DEFAULT_TIMEOUT } = args;
+
+      const response = await requestMouseWheel(
+        { selector, x, y, duration, deltaX, deltaY },
+        Math.max(timeout_ms, duration + 1000),
+        notebook
+      );
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: `Scrolled (deltaX: ${deltaX}, deltaY: ${deltaY}) at (${response.clientX}, ${response.clientY})${selector ? ` on ${selector}` : ''}`
+        }]
+      };
+    }
+
+    if (name === 'DefineVariable') {
+      const { notebook, name: varName, expression, inputs, timeout_ms = DEFAULT_TIMEOUT } = args;
+
+      if (!varName) {
+        return {
+          content: [{ type: 'text', text: 'Error: name is required' }],
+          isError: true
+        };
+      }
+
+      if (!expression) {
+        return {
+          content: [{ type: 'text', text: 'Error: expression is required' }],
+          isError: true
+        };
+      }
+
+      const response = await requestDefineVariable(varName, inputs, expression, timeout_ms, notebook);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      const output = [`Defined: ${varName}`];
+      output.push(`Expression: ${expression}`);
+
+      if (response.inputs && response.inputs.length > 0) {
+        output.push(`Dependencies: ${response.inputs.join(', ')}`);
+      } else {
+        output.push(`Dependencies: (none)`);
+      }
+
+      output.push(`State: ${response.state}`);
+
+      if (response.state === 'fulfilled') {
+        output.push('');
+        output.push('Value:');
+        output.push(formatValue(response.value));
+      } else if (response.state === 'rejected') {
+        output.push(`Error: ${response.error}`);
+        if (response.stack) {
+          output.push(`Stack: ${response.stack.split('\n').slice(0, 3).join('\n  ')}`);
+        }
+      } else if (response.state === 'pending') {
+        output.push('(Value is still computing)');
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: output.join('\n')
+        }]
+      };
+    }
+
+    if (name === 'DeleteVariable') {
+      const { notebook, name: varName, timeout_ms = DEFAULT_TIMEOUT } = args;
+
+      if (!varName) {
+        return {
+          content: [{ type: 'text', text: 'Error: name is required' }],
+          isError: true
+        };
+      }
+
+      const response = await requestDeleteVariable(varName, timeout_ms, notebook);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: `Deleted injected variable: ${varName}`
+        }]
+      };
+    }
+
+    if (name === 'ListInjectedVariables') {
+      const { notebook, timeout_ms = DEFAULT_TIMEOUT } = args || {};
+
+      const response = await requestListInjectedVariables(timeout_ms, notebook);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      if (response.variables.length === 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: 'No injected variables. Use DefineVariable to inject ephemeral variables into the runtime.'
+          }]
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: `Injected variables (${response.variables.length}):\n\n- ${response.variables.join('\n- ')}`
         }]
       };
     }

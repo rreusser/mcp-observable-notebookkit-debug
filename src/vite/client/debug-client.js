@@ -30,6 +30,8 @@
       this.errorObserver = null;
       this.sessionStartTime = Date.now();
       this.sessionEnded = false;
+      // Track injected ephemeral variables for cleanup
+      this.injectedVariables = new Map();
     }
 
     init() {
@@ -180,6 +182,36 @@
 
       if (message.type === "Eval") {
         this.handleEvalRequest(message);
+        return;
+      }
+
+      if (message.type === "DefineVariable") {
+        this.handleDefineVariableRequest(message);
+        return;
+      }
+
+      if (message.type === "DeleteVariable") {
+        this.handleDeleteVariableRequest(message);
+        return;
+      }
+
+      if (message.type === "ListInjectedVariables") {
+        this.handleListInjectedVariablesRequest(message);
+        return;
+      }
+
+      if (message.type === "MouseClick") {
+        this.handleMouseClickRequest(message);
+        return;
+      }
+
+      if (message.type === "MouseDrag") {
+        this.handleMouseDragRequest(message);
+        return;
+      }
+
+      if (message.type === "MouseWheel") {
+        this.handleMouseWheelRequest(message);
         return;
       }
     }
@@ -1222,10 +1254,18 @@
 
       try {
         // Use Function constructor to create a function from the code
-        // This allows returning the result of the expression
         // We wrap in an async function to support await
         const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-        const fn = new AsyncFunction(code);
+
+        // Try to auto-return single expressions by wrapping with return()
+        // Fall back to raw code if that causes a syntax error (e.g., multi-statement code)
+        let fn;
+        try {
+          fn = new AsyncFunction(`return (${code})`);
+        } catch (syntaxError) {
+          fn = new AsyncFunction(code);
+        }
+
         const result = await fn();
 
         this.send({
@@ -1241,6 +1281,465 @@
           success: true, // Request succeeded, but code threw an error
           error: error.message,
           stack: error.stack,
+        });
+      }
+    }
+
+    /**
+     * Handle DefineVariable request - inject an ephemeral variable into the Observable runtime
+     * The variable participates in the reactive graph and can depend on existing variables.
+     *
+     * Accepts either:
+     * - { name, inputs, expression } - explicit dependencies and expression string
+     * - { name, expression } - auto-detect dependencies from expression
+     */
+    async handleDefineVariableRequest(message) {
+      const { name, inputs, expression } = message;
+      const runtime = this.getRuntimeModule();
+
+      if (!runtime) {
+        this.send({
+          type: "define_response",
+          requestId: message.requestId,
+          name,
+          success: false,
+          error: "Observable runtime not found",
+        });
+        return;
+      }
+
+      try {
+        // If inputs not provided, try to auto-detect from expression
+        let deps = inputs;
+        if (!deps) {
+          deps = this.detectDependencies(runtime, expression);
+        }
+
+        // Build the definition function
+        // The function receives resolved values of dependencies in order
+        const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+        const depParams = deps.join(", ");
+        const fn = new AsyncFunction(...deps, `return (${expression})`);
+
+        // Check for collision with notebook-defined variables
+        if (runtime._scope && runtime._scope.has(name) && !this.injectedVariables.has(name)) {
+          this.send({
+            type: "define_response",
+            requestId: message.requestId,
+            name,
+            success: false,
+            error: `Cannot define "${name}": a variable with this name already exists in the notebook`,
+          });
+          return;
+        }
+
+        // Delete any existing injected variable with this name
+        if (this.injectedVariables.has(name)) {
+          this.injectedVariables.get(name).delete();
+          this.injectedVariables.delete(name);
+        }
+
+        // Create the new variable in the runtime
+        const variable = runtime.define(name, deps, fn);
+        this.injectedVariables.set(name, variable);
+
+        // Wait for the value to be computed
+        const result = await this.getValueState(runtime, name, message.timeout || 5000);
+
+        if (result.state === "fulfilled") {
+          this.send({
+            type: "define_response",
+            requestId: message.requestId,
+            name,
+            success: true,
+            state: "fulfilled",
+            value: this.serializeValue(result.value),
+            inputs: deps,
+          });
+        } else if (result.state === "pending") {
+          this.send({
+            type: "define_response",
+            requestId: message.requestId,
+            name,
+            success: true,
+            state: "pending",
+            inputs: deps,
+          });
+        } else {
+          this.send({
+            type: "define_response",
+            requestId: message.requestId,
+            name,
+            success: true,
+            state: "rejected",
+            error: result.error,
+            stack: result.stack,
+            inputs: deps,
+          });
+        }
+      } catch (error) {
+        this.send({
+          type: "define_response",
+          requestId: message.requestId,
+          name,
+          success: false,
+          error: error.message,
+          stack: error.stack,
+        });
+      }
+    }
+
+    /**
+     * Detect variable dependencies from an expression by checking which
+     * identifiers in the expression match existing runtime variables.
+     */
+    detectDependencies(runtime, expression) {
+      if (!runtime._scope) return [];
+
+      // Get all variable names from the runtime
+      const scopeNames = new Set(
+        Array.from(runtime._scope.keys()).filter(n => !n.startsWith("_"))
+      );
+
+      // Simple identifier extraction using regex
+      // This matches word characters that could be variable names
+      // It's not perfect but works for common cases
+      const identifierPattern = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/g;
+      const foundIdentifiers = new Set();
+      let match;
+
+      while ((match = identifierPattern.exec(expression)) !== null) {
+        const id = match[1];
+        // Filter out JavaScript keywords and common globals
+        if (scopeNames.has(id) && !this.isJavaScriptKeyword(id)) {
+          foundIdentifiers.add(id);
+        }
+      }
+
+      return Array.from(foundIdentifiers);
+    }
+
+    /**
+     * Check if a string is a JavaScript keyword or common global
+     */
+    isJavaScriptKeyword(word) {
+      const keywords = new Set([
+        // Keywords
+        "break", "case", "catch", "continue", "debugger", "default", "delete",
+        "do", "else", "finally", "for", "function", "if", "in", "instanceof",
+        "new", "return", "switch", "this", "throw", "try", "typeof", "var",
+        "void", "while", "with", "class", "const", "enum", "export", "extends",
+        "import", "super", "implements", "interface", "let", "package", "private",
+        "protected", "public", "static", "yield", "await", "async",
+        // Common globals
+        "undefined", "null", "true", "false", "NaN", "Infinity",
+        "Array", "Object", "String", "Number", "Boolean", "Function",
+        "Math", "Date", "RegExp", "Error", "JSON", "Promise", "Map", "Set",
+        "console", "window", "document", "parseInt", "parseFloat", "isNaN",
+        "isFinite", "encodeURI", "decodeURI", "encodeURIComponent", "decodeURIComponent"
+      ]);
+      return keywords.has(word);
+    }
+
+    /**
+     * Handle DeleteVariable request - remove an injected ephemeral variable
+     */
+    async handleDeleteVariableRequest(message) {
+      const { name } = message;
+
+      if (!this.injectedVariables.has(name)) {
+        this.send({
+          type: "delete_response",
+          requestId: message.requestId,
+          name,
+          success: false,
+          error: `No injected variable named "${name}" found`,
+        });
+        return;
+      }
+
+      try {
+        const variable = this.injectedVariables.get(name);
+        variable.delete();
+        this.injectedVariables.delete(name);
+
+        this.send({
+          type: "delete_response",
+          requestId: message.requestId,
+          name,
+          success: true,
+        });
+      } catch (error) {
+        this.send({
+          type: "delete_response",
+          requestId: message.requestId,
+          name,
+          success: false,
+          error: error.message,
+        });
+      }
+    }
+
+    /**
+     * Handle ListInjectedVariables request - list all ephemeral variables
+     */
+    handleListInjectedVariablesRequest(message) {
+      const names = Array.from(this.injectedVariables.keys());
+
+      this.send({
+        type: "injected_list_response",
+        requestId: message.requestId,
+        success: true,
+        variables: names,
+      });
+    }
+
+    /**
+     * Get element and compute absolute coordinates for mouse events
+     */
+    getMouseEventTarget(selector, x = 0, y = 0) {
+      let target = document.body;
+      let clientX = x;
+      let clientY = y;
+
+      if (selector) {
+        const el = document.querySelector(selector);
+        if (!el) {
+          return { error: `Element not found: ${selector}` };
+        }
+        target = el;
+        const rect = el.getBoundingClientRect();
+        clientX = rect.left + x;
+        clientY = rect.top + y;
+      }
+
+      return { target, clientX, clientY };
+    }
+
+    /**
+     * Handle MouseClick request - simulate a mouse click
+     */
+    handleMouseClickRequest(message) {
+      const { selector, x = 0, y = 0, button = 0 } = message;
+
+      try {
+        const result = this.getMouseEventTarget(selector, x, y);
+        if (result.error) {
+          this.send({
+            type: "mouse_response",
+            requestId: message.requestId,
+            success: false,
+            error: result.error,
+          });
+          return;
+        }
+
+        const { target, clientX, clientY } = result;
+
+        const eventInit = {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          button,
+          buttons: 1 << button,
+          clientX,
+          clientY,
+          screenX: clientX,
+          screenY: clientY,
+        };
+
+        target.dispatchEvent(new MouseEvent("mousedown", eventInit));
+        target.dispatchEvent(new MouseEvent("mouseup", eventInit));
+        target.dispatchEvent(new MouseEvent("click", eventInit));
+
+        this.send({
+          type: "mouse_response",
+          requestId: message.requestId,
+          success: true,
+          clientX,
+          clientY,
+        });
+      } catch (error) {
+        this.send({
+          type: "mouse_response",
+          requestId: message.requestId,
+          success: false,
+          error: error.message,
+        });
+      }
+    }
+
+    /**
+     * Handle MouseDrag request - simulate a mouse drag with animation frames
+     * d3-zoom uses mousedown/mousemove/mouseup (not pointer events)
+     */
+    handleMouseDragRequest(message) {
+      const {
+        selector,
+        startX = 0,
+        startY = 0,
+        endX = 0,
+        endY = 0,
+        duration = 300,
+        button = 0,
+      } = message;
+
+      try {
+        const startResult = this.getMouseEventTarget(selector, startX, startY);
+        if (startResult.error) {
+          this.send({
+            type: "mouse_response",
+            requestId: message.requestId,
+            success: false,
+            error: startResult.error,
+          });
+          return;
+        }
+
+        const endResult = this.getMouseEventTarget(selector, endX, endY);
+        const { target, clientX: startClientX, clientY: startClientY } = startResult;
+        const { clientX: endClientX, clientY: endClientY } = endResult;
+
+        const eventInit = {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          button,
+          buttons: 1 << button,
+          clientX: startClientX,
+          clientY: startClientY,
+          screenX: startClientX,
+          screenY: startClientY,
+        };
+
+        // d3-zoom listens for mousedown on the element
+        target.dispatchEvent(new MouseEvent("mousedown", eventInit));
+
+        const startTime = performance.now();
+        let moveCount = 0;
+
+        const animate = () => {
+          const elapsed = performance.now() - startTime;
+          const t = Math.min(elapsed / duration, 1);
+
+          // Linear interpolation
+          const currentX = startClientX + (endClientX - startClientX) * t;
+          const currentY = startClientY + (endClientY - startClientY) * t;
+
+          // d3-zoom listens for mousemove on window (event.view)
+          window.dispatchEvent(
+            new MouseEvent("mousemove", {
+              ...eventInit,
+              clientX: currentX,
+              clientY: currentY,
+              screenX: currentX,
+              screenY: currentY,
+            })
+          );
+          moveCount++;
+
+          if (t < 1) {
+            requestAnimationFrame(animate);
+          } else {
+            // d3-zoom listens for mouseup on window
+            window.dispatchEvent(
+              new MouseEvent("mouseup", {
+                ...eventInit,
+                clientX: endClientX,
+                clientY: endClientY,
+                screenX: endClientX,
+                screenY: endClientY,
+              })
+            );
+
+            this.send({
+              type: "mouse_response",
+              requestId: message.requestId,
+              success: true,
+              startClientX,
+              startClientY,
+              endClientX,
+              endClientY,
+              moveCount,
+              actualDuration: Math.round(performance.now() - startTime),
+            });
+          }
+        };
+
+        requestAnimationFrame(animate);
+      } catch (error) {
+        this.send({
+          type: "mouse_response",
+          requestId: message.requestId,
+          success: false,
+          error: error.message,
+        });
+      }
+    }
+
+    /**
+     * Handle MouseWheel request - simulate a mouse wheel scroll
+     * Sends multiple small wheel events over time for smooth animation
+     */
+    handleMouseWheelRequest(message) {
+      const { selector, x = 0, y = 0, duration = 300, deltaX = 0, deltaY = 0 } = message;
+
+      try {
+        const result = this.getMouseEventTarget(selector, x, y);
+        if (result.error) {
+          this.send({
+            type: "mouse_response",
+            requestId: message.requestId,
+            success: false,
+            error: result.error,
+          });
+          return;
+        }
+
+        const { target, clientX, clientY } = result;
+
+        // Send multiple small wheel events for smooth animation
+        // Use ~60fps timing (16ms per frame)
+        const steps = Math.max(1, Math.round(duration / 16));
+        const stepDeltaX = deltaX / steps;
+        const stepDeltaY = deltaY / steps;
+        let step = 0;
+
+        const sendWheelEvent = () => {
+          target.dispatchEvent(
+            new WheelEvent("wheel", {
+              bubbles: true,
+              cancelable: true,
+              view: window,
+              clientX,
+              clientY,
+              deltaX: stepDeltaX,
+              deltaY: stepDeltaY,
+              deltaMode: 0, // DOM_DELTA_PIXEL
+            })
+          );
+          step++;
+
+          if (step < steps) {
+            setTimeout(sendWheelEvent, duration / steps);
+          } else {
+            this.send({
+              type: "mouse_response",
+              requestId: message.requestId,
+              success: true,
+              clientX,
+              clientY,
+            });
+          }
+        };
+
+        sendWheelEvent();
+      } catch (error) {
+        this.send({
+          type: "mouse_response",
+          requestId: message.requestId,
+          success: false,
+          error: error.message,
         });
       }
     }
