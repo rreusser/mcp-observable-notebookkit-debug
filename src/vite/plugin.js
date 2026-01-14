@@ -19,7 +19,7 @@ import { join } from "path";
 const CLIENT_FILES = {
   runtimeExpose: new URL("./client/runtime-expose.js", import.meta.url),
   earlyConsolePatch: new URL("./client/early-console-patch.js", import.meta.url),
-  debugClient: new URL("./client/debug-client.js", import.meta.url),
+  debugClient: new URL("../../dist/debug-client.js", import.meta.url),
 };
 
 // Read client file - in dev mode, reads fresh each time for easier development

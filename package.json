@@ -7,9 +7,17 @@
   "bin": {
     "mcp-notebookkit-debug": "./bin/mcp-notebookkit-debug.js"
   },
+  "scripts": {
+    "build": "node build.js",
+    "watch": "node build.js --watch",
+    "prepublishOnly": "npm run build"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.6.0",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
   },
   "peerDependencies": {
     "@observablehq/notebook-kit": "^1.5.0"
