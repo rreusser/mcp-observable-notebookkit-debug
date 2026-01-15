@@ -6,10 +6,13 @@ import { captureSVGAsImage } from "../utils/serialize.js";
 
 /**
  * Handle GetElementContent request - gets content from DOM elements
- * Supports text, HTML, canvas capture, and SVG
+ * Auto-detects element type and returns appropriate content:
+ * - Canvas: image data
+ * - SVG: image data + source
+ * - Other: text content
  */
 export async function handleGetElementContentRequest(client, message) {
-  const { selector, mode = 'auto' } = message;
+  const { selector } = message;
 
   try {
     const element = document.querySelector(selector);
@@ -37,23 +40,14 @@ export async function handleGetElementContentRequest(client, message) {
     // Determine element type
     const isCanvas = element instanceof HTMLCanvasElement;
     const isSVG = element instanceof SVGElement || tagName === 'svg';
-    const isImage = element instanceof HTMLImageElement;
 
-    // Determine what to capture based on mode and element type
-    const shouldCaptureImage = mode === 'image' ||
-      (mode === 'auto' && (isCanvas || isSVG));
-    const shouldGetText = mode === 'text' ||
-      (mode === 'auto' && !isCanvas && !isSVG);
-    const shouldGetHTML = mode === 'html';
-
-    // Set element type hint
+    // Set element type
     if (isCanvas) response.elementType = 'canvas';
     else if (isSVG) response.elementType = 'svg';
-    else if (isImage) response.elementType = 'image';
     else response.elementType = 'element';
 
-    // Capture as image if needed
-    if (shouldCaptureImage) {
+    // Canvas and SVG: capture as image
+    if (isCanvas || isSVG) {
       try {
         const imageData = await captureElementAsImage(element);
         if (imageData) {
@@ -64,20 +58,14 @@ export async function handleGetElementContentRequest(client, message) {
       } catch (err) {
         response.captureError = err.message;
       }
-    }
 
-    // Get SVG source for SVG elements
-    if (isSVG && mode !== 'image') {
-      response.svgSource = element.outerHTML;
-    }
-
-    // Get text content
-    if (shouldGetText || mode === 'auto') {
+      // Also include SVG source for SVG elements
+      if (isSVG) {
+        response.svgSource = element.outerHTML;
+      }
+    } else {
+      // Regular elements: return text and HTML content
       response.textContent = element.textContent?.trim() || '';
-    }
-
-    // Get HTML content
-    if (shouldGetHTML) {
       response.innerHTML = element.innerHTML;
     }
 

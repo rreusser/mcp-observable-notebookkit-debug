@@ -13,7 +13,7 @@ import { handleEvalRequest } from "./handlers/eval.js";
 import { handleDefineVariableRequest, handleDeleteVariableRequest, handleListInjectedVariablesRequest } from "./handlers/variables.js";
 import { handleMouseClickRequest, handleMouseDragRequest, handleMouseWheelRequest, handleMouseHoverRequest } from "./handlers/mouse.js";
 import { handleSendKeysRequest } from "./handlers/keyboard.js";
-import { logEvent, initEventLog } from "./ui/event-log.js";
+import { logEvent, logResponse, initEventLog } from "./ui/event-log.js";
 
 const RECONNECT_INTERVAL = 2000;
 const SESSION_TIMEOUT = 5000;
@@ -249,6 +249,11 @@ export class DebugClient {
       sessionId: this.sessionId,
       timestamp: message.timestamp || Date.now(),
     });
+
+    // Log responses to the event log UI (link them to their requests)
+    if (message.requestId && message.type?.endsWith('_response')) {
+      logResponse(message.requestId, message);
+    }
 
     if (this.connected && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(data);

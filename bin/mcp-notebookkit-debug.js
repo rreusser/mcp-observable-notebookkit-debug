@@ -506,8 +506,8 @@ async function requestSetInput(name, value, timeout = DEFAULT_TIMEOUT, notebook 
 /**
  * Request element content from browser
  */
-async function requestElementContent(selector, mode = 'auto', timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('GetElementContent', { selector, mode }, timeout, notebook);
+async function requestElementContent(selector, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('GetElementContent', { selector }, timeout, notebook);
 }
 
 /**
@@ -1043,12 +1043,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             selector: {
               type: 'string',
               description: 'CSS selector for the element (e.g., "#cell-31", ".my-class", "svg.chart")'
-            },
-            mode: {
-              type: 'string',
-              enum: ['auto', 'text', 'html', 'image'],
-              description: 'Content extraction mode. "auto" (default) detects based on element type. "text" returns textContent, "html" returns innerHTML, "image" captures as PNG.',
-              default: 'auto'
             },
             timeout_ms: {
               type: 'number',
@@ -1684,7 +1678,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'GetElementContent') {
-      const { notebook, selector, mode = 'auto', timeout_ms = DEFAULT_TIMEOUT } = args;
+      const { notebook, selector, timeout_ms = DEFAULT_TIMEOUT } = args;
 
       if (!selector) {
         return {
@@ -1693,7 +1687,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const response = await requestElementContent(selector, mode, timeout_ms, notebook);
+      const response = await requestElementContent(selector, timeout_ms, notebook);
 
       if (!response.success) {
         return {

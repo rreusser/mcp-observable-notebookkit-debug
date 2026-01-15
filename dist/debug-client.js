@@ -851,7 +851,7 @@
 
   // src/vite/client/handlers/elements.js
   async function handleGetElementContentRequest(client, message) {
-    const { selector, mode = "auto" } = message;
+    const { selector } = message;
     try {
       const element = document.querySelector(selector);
       if (!element) {
@@ -874,15 +874,10 @@
       };
       const isCanvas = element instanceof HTMLCanvasElement;
       const isSVG = element instanceof SVGElement || tagName === "svg";
-      const isImage = element instanceof HTMLImageElement;
-      const shouldCaptureImage = mode === "image" || mode === "auto" && (isCanvas || isSVG);
-      const shouldGetText = mode === "text" || mode === "auto" && !isCanvas && !isSVG;
-      const shouldGetHTML = mode === "html";
       if (isCanvas) response.elementType = "canvas";
       else if (isSVG) response.elementType = "svg";
-      else if (isImage) response.elementType = "image";
       else response.elementType = "element";
-      if (shouldCaptureImage) {
+      if (isCanvas || isSVG) {
         try {
           const imageData = await captureElementAsImage(element);
           if (imageData) {
@@ -893,14 +888,11 @@
         } catch (err) {
           response.captureError = err.message;
         }
-      }
-      if (isSVG && mode !== "image") {
-        response.svgSource = element.outerHTML;
-      }
-      if (shouldGetText || mode === "auto") {
+        if (isSVG) {
+          response.svgSource = element.outerHTML;
+        }
+      } else {
         response.textContent = element.textContent?.trim() || "";
-      }
-      if (shouldGetHTML) {
         response.innerHTML = element.innerHTML;
       }
       client.send(response);
@@ -2430,9 +2422,12 @@
   var container = null;
   var toastContainer = null;
   var historyPanel = null;
+  var detailPanel = null;
   var toggleButton = null;
   var expanded = false;
   var events = [];
+  var eventsByRequestId = /* @__PURE__ */ new Map();
+  var selectedEventIndex = null;
   var styles2 = `
 .mcp-event-log {
   position: fixed;
@@ -2539,7 +2534,7 @@
   position: absolute;
   bottom: 36px;
   right: 0;
-  width: 320px;
+  width: 280px;
   max-height: 400px;
   background: rgba(24, 24, 24, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -2613,7 +2608,11 @@
 }
 
 .mcp-event-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.mcp-event-item.selected {
+  background: rgba(110, 231, 183, 0.1);
 }
 
 .mcp-event-item:last-child {
@@ -2625,12 +2624,15 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .mcp-event-name {
   color: #6ee7b7;
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mcp-event-label {
@@ -2643,27 +2645,7 @@
 .mcp-event-time {
   color: rgba(255, 255, 255, 0.3);
   font-size: 10px;
-}
-
-.mcp-event-args {
-  display: none;
-  padding: 0 12px 10px 12px;
-}
-
-.mcp-event-item.expanded .mcp-event-args {
-  display: block;
-}
-
-.mcp-event-args pre {
-  margin: 0;
-  padding: 8px;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: 4px;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 10px;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
+  flex-shrink: 0;
 }
 
 .mcp-event-empty {
@@ -2693,6 +2675,178 @@
   transform: scale(1.3);
 }
 
+/* Detail panel - appears to the left of the event list */
+.mcp-detail-panel {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 36px;
+  right: 292px;
+  width: 400px;
+  max-height: 400px;
+  background: rgba(24, 24, 24, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow: hidden;
+  display: none;
+  flex-direction: column;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.mcp-detail-panel.visible {
+  display: flex;
+}
+
+/* Caret pointing to the event list */
+.mcp-detail-panel::after {
+  content: '';
+  position: absolute;
+  right: -8px;
+  top: var(--caret-top, 50px);
+  width: 0;
+  height: 0;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+  border-left: 8px solid rgba(24, 24, 24, 0.95);
+}
+
+.mcp-detail-panel::before {
+  content: '';
+  position: absolute;
+  right: -9px;
+  top: var(--caret-top, 50px);
+  width: 0;
+  height: 0;
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
+  border-left: 9px solid rgba(255, 255, 255, 0.1);
+  margin-top: -1px;
+}
+
+.mcp-detail-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mcp-detail-title {
+  color: #6ee7b7;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.mcp-detail-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.mcp-detail-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.mcp-detail-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+
+.mcp-detail-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.mcp-detail-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mcp-detail-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.mcp-detail-section {
+  margin-bottom: 16px;
+}
+
+.mcp-detail-section:last-child {
+  margin-bottom: 0;
+}
+
+.mcp-detail-section-title {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.mcp-detail-section pre {
+  margin: 0;
+  padding: 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 10px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mcp-detail-section img {
+  max-width: 100%;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.mcp-detail-meta {
+  display: flex;
+  gap: 16px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10px;
+  margin-bottom: 12px;
+}
+
+.mcp-detail-meta-item {
+  display: flex;
+  gap: 4px;
+}
+
+.mcp-detail-meta-label {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.mcp-detail-status {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.mcp-detail-status.success {
+  background: rgba(110, 231, 183, 0.2);
+  color: #6ee7b7;
+}
+
+.mcp-detail-status.error {
+  background: rgba(248, 113, 113, 0.2);
+  color: #f87171;
+}
+
+.mcp-detail-status.pending {
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+}
+
 `;
   function formatTime(timestamp) {
     const d = new Date(timestamp);
@@ -2703,13 +2857,10 @@
       second: "2-digit"
     });
   }
-  function formatArgs(args) {
+  function formatArgs(args, excludeKeys = ["requestId", "timestamp", "sessionId", "type", "label"]) {
     try {
       const cleaned = { ...args };
-      delete cleaned.requestId;
-      delete cleaned.timestamp;
-      delete cleaned.sessionId;
-      delete cleaned.type;
+      excludeKeys.forEach((key) => delete cleaned[key]);
       if (Object.keys(cleaned).length === 0) {
         return null;
       }
@@ -2771,33 +2922,107 @@
       setTimeout(() => toast.remove(), 300);
     }, TOAST_DURATION);
   }
+  function renderDetailPanel(event, itemElement) {
+    if (!detailPanel || !event) {
+      if (detailPanel) {
+        detailPanel.classList.remove("visible");
+      }
+      return;
+    }
+    const listRect = historyPanel.querySelector(".mcp-event-log-list").getBoundingClientRect();
+    const itemRect = itemElement.getBoundingClientRect();
+    const caretTop = itemRect.top - listRect.top + historyPanel.querySelector(".mcp-event-log-header").offsetHeight + 16;
+    detailPanel.style.setProperty("--caret-top", `${Math.max(20, Math.min(caretTop, 360))}px`);
+    const titleEl = detailPanel.querySelector(".mcp-detail-title");
+    const contentEl = detailPanel.querySelector(".mcp-detail-content");
+    const labelHtml = event.label ? ` <span class="mcp-event-label">(${event.label})</span>` : "";
+    titleEl.innerHTML = `${event.name}${labelHtml}`;
+    let html = "";
+    html += `<div class="mcp-detail-meta">`;
+    html += `<div class="mcp-detail-meta-item"><span class="mcp-detail-meta-label">Time:</span> ${formatTime(event.timestamp)}</div>`;
+    if (event.response) {
+      const status = event.response.success ? "success" : "error";
+      html += `<div class="mcp-detail-meta-item"><span class="mcp-detail-status ${status}">${status}</span></div>`;
+    } else {
+      html += `<div class="mcp-detail-meta-item"><span class="mcp-detail-status pending">pending</span></div>`;
+    }
+    html += `</div>`;
+    const argsStr = formatArgs(event.args);
+    if (argsStr) {
+      html += `<div class="mcp-detail-section">`;
+      html += `<div class="mcp-detail-section-title">Request</div>`;
+      html += `<pre>${escapeHtml(argsStr)}</pre>`;
+      html += `</div>`;
+    }
+    if (event.response) {
+      html += `<div class="mcp-detail-section">`;
+      html += `<div class="mcp-detail-section-title">Response</div>`;
+      const resp = event.response;
+      if (resp.imageData) {
+        const src = resp.imageData.startsWith("data:") ? resp.imageData : `data:image/png;base64,${resp.imageData}`;
+        html += `<img src="${src}" alt="Response image" />`;
+      }
+      const responseStr = formatArgs(resp, ["requestId", "timestamp", "sessionId", "type", "imageData"]);
+      if (responseStr) {
+        html += `<pre>${escapeHtml(responseStr)}</pre>`;
+      }
+      html += `</div>`;
+    }
+    contentEl.innerHTML = html;
+    detailPanel.classList.add("visible");
+  }
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+  function closeDetailPanel() {
+    if (detailPanel) {
+      detailPanel.classList.remove("visible");
+    }
+    selectedEventIndex = null;
+    historyPanel?.querySelectorAll(".mcp-event-item.selected").forEach((el) => {
+      el.classList.remove("selected");
+    });
+  }
   function renderHistory() {
     if (!historyPanel) return;
     const list = historyPanel.querySelector(".mcp-event-log-list");
     if (!list) return;
     if (events.length === 0) {
       list.innerHTML = '<div class="mcp-event-empty">No events yet</div>';
+      closeDetailPanel();
       return;
     }
     list.innerHTML = events.map((event, index) => {
-      const argsStr = formatArgs(event.args);
       const isReplayable = MOUSE_EVENTS.includes(event.name);
+      const isSelected = selectedEventIndex === index;
       const labelHtml = event.label ? `<span class="mcp-event-label">(${event.label})</span>` : "";
+      const hasResponse = event.response ? " has-response" : "";
       return `
-      <div class="mcp-event-item${isReplayable ? " replayable" : ""}" data-index="${index}">
+      <div class="mcp-event-item${isReplayable ? " replayable" : ""}${isSelected ? " selected" : ""}${hasResponse}" data-index="${index}">
         <div class="mcp-event-summary">
           <span class="mcp-event-name">${event.name}${labelHtml}</span>
           <span class="mcp-event-time">${formatTime(event.timestamp)}</span>
         </div>
-        ${argsStr ? `<div class="mcp-event-args"><pre>${argsStr}</pre></div>` : ""}
       </div>
     `;
     }).join("");
     list.querySelectorAll(".mcp-event-item").forEach((item) => {
       const index = parseInt(item.dataset.index, 10);
       const event = events[index];
-      item.addEventListener("click", () => {
-        item.classList.toggle("expanded");
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (selectedEventIndex === index) {
+          closeDetailPanel();
+        } else {
+          list.querySelectorAll(".mcp-event-item.selected").forEach((el) => {
+            el.classList.remove("selected");
+          });
+          item.classList.add("selected");
+          selectedEventIndex = index;
+          renderDetailPanel(event, item);
+        }
       });
       if (MOUSE_EVENTS.includes(event.name)) {
         item.addEventListener("mouseenter", () => {
@@ -2805,6 +3030,12 @@
         });
       }
     });
+    if (selectedEventIndex !== null && selectedEventIndex < events.length) {
+      const selectedItem = list.querySelector(`[data-index="${selectedEventIndex}"]`);
+      if (selectedItem) {
+        renderDetailPanel(events[selectedEventIndex], selectedItem);
+      }
+    }
   }
   function toggleExpanded() {
     expanded = !expanded;
@@ -2813,10 +3044,14 @@
     toastContainer.style.display = expanded ? "none" : "flex";
     if (expanded) {
       renderHistory();
+    } else {
+      closeDetailPanel();
     }
   }
   function clearHistory() {
     events = [];
+    eventsByRequestId.clear();
+    closeDetailPanel();
     renderHistory();
   }
   function init2() {
@@ -2829,6 +3064,20 @@
     toastContainer = document.createElement("div");
     toastContainer.className = "mcp-event-log-toasts";
     container.appendChild(toastContainer);
+    detailPanel = document.createElement("div");
+    detailPanel.className = "mcp-detail-panel";
+    detailPanel.innerHTML = `
+    <div class="mcp-detail-header">
+      <span class="mcp-detail-title"></span>
+      <button class="mcp-detail-close">&times;</button>
+    </div>
+    <div class="mcp-detail-content"></div>
+  `;
+    container.appendChild(detailPanel);
+    detailPanel.querySelector(".mcp-detail-close").addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeDetailPanel();
+    });
     historyPanel = document.createElement("div");
     historyPanel.className = "mcp-event-log-history";
     historyPanel.innerHTML = `
@@ -2853,14 +3102,26 @@
   function logEvent(eventName, args = {}) {
     init2();
     const label = args.label;
-    events.unshift({
+    const requestId = args.requestId;
+    const event = {
       name: eventName,
       args,
       label,
-      timestamp: Date.now()
-    });
+      requestId,
+      timestamp: Date.now(),
+      response: null
+    };
+    events.unshift(event);
+    if (requestId) {
+      eventsByRequestId.set(requestId, event);
+    }
     if (events.length > MAX_EVENTS) {
-      events = events.slice(0, MAX_EVENTS);
+      const removed = events.splice(MAX_EVENTS);
+      removed.forEach((e) => {
+        if (e.requestId) {
+          eventsByRequestId.delete(e.requestId);
+        }
+      });
     }
     if (!expanded) {
       createToast(eventName, label);
@@ -2868,11 +3129,20 @@
       renderHistory();
     }
   }
+  function logResponse(requestId, response) {
+    const event = eventsByRequestId.get(requestId);
+    if (event) {
+      event.response = response;
+      if (expanded) {
+        renderHistory();
+      }
+    }
+  }
   function getEventLog() {
-    return { events, expanded, container };
+    return { events, expanded, container, eventsByRequestId };
   }
   if (typeof window !== "undefined") {
-    window.__mcpEventLog = { getEventLog };
+    window.__mcpEventLog = { getEventLog, logResponse };
   }
 
   // src/vite/client/client.js
@@ -3064,6 +3334,9 @@
         sessionId: this.sessionId,
         timestamp: message.timestamp || Date.now()
       });
+      if (message.requestId && message.type?.endsWith("_response")) {
+        logResponse(message.requestId, message);
+      }
       if (this.connected && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(data);
       } else {
