@@ -546,6 +546,13 @@ async function requestMouseWheel(params, timeout = DEFAULT_TIMEOUT, notebook = n
 }
 
 /**
+ * Request mouse hover in browser
+ */
+async function requestMouseHover(params, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('MouseHover', params, timeout, notebook);
+}
+
+/**
  * Request keyboard input in browser
  */
 async function requestSendKeys(keys, selector, modifiers, timeout = DEFAULT_TIMEOUT, notebook = null) {
@@ -1219,6 +1226,33 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'number',
               description: 'Vertical scroll amount (positive = scroll down). Default: 0',
               default: 0
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: DEFAULT_TIMEOUT
+            }
+          }
+        }
+      },
+      {
+        name: 'MouseHover',
+        description: 'Simulate mouse hover at a position. Dispatches mouseenter, mouseover, and mousemove events to trigger hover states and tooltips.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: notebookParam,
+            selector: {
+              type: 'string',
+              description: 'CSS selector for target element. If provided, position is relative to element.'
+            },
+            x: {
+              type: 'number',
+              description: 'X coordinate (relative to element if selector provided, otherwise viewport)'
+            },
+            y: {
+              type: 'number',
+              description: 'Y coordinate (relative to element if selector provided, otherwise viewport)'
             },
             timeout_ms: {
               type: 'number',
@@ -1905,6 +1939,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content: [{
           type: 'text',
           text: `Scrolled (deltaX: ${deltaX}, deltaY: ${deltaY}) at (${response.clientX}, ${response.clientY})${selector ? ` on ${selector}` : ''}`
+        }]
+      };
+    }
+
+    if (name === 'MouseHover') {
+      const { notebook, selector, x = 0, y = 0, timeout_ms = DEFAULT_TIMEOUT } = args;
+
+      const response = await requestMouseHover({ selector, x, y }, timeout_ms, notebook);
+
+      if (!response.success) {
+        return {
+          content: [{ type: 'text', text: `Error: ${response.error}` }],
+          isError: true
+        };
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: `Hovered at (${response.clientX}, ${response.clientY})${selector ? ` on ${selector}` : ''}`
         }]
       };
     }

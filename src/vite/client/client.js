@@ -11,8 +11,9 @@ import { handleGetElementContentRequest } from "./handlers/elements.js";
 import { handleGetDependencyGraphRequest } from "./handlers/graph.js";
 import { handleEvalRequest } from "./handlers/eval.js";
 import { handleDefineVariableRequest, handleDeleteVariableRequest, handleListInjectedVariablesRequest } from "./handlers/variables.js";
-import { handleMouseClickRequest, handleMouseDragRequest, handleMouseWheelRequest } from "./handlers/mouse.js";
+import { handleMouseClickRequest, handleMouseDragRequest, handleMouseWheelRequest, handleMouseHoverRequest } from "./handlers/mouse.js";
 import { handleSendKeysRequest } from "./handlers/keyboard.js";
+import { logEvent } from "./ui/event-log.js";
 
 const RECONNECT_INTERVAL = 2000;
 const SESSION_TIMEOUT = 5000;
@@ -136,6 +137,11 @@ export class DebugClient {
       return;
     }
 
+    // Log MCP events to the overlay
+    if (message.type) {
+      logEvent(message.type, message);
+    }
+
     // Value-centric handlers
     if (message.type === "GetValue") {
       handleGetValueRequest(this, message);
@@ -220,6 +226,11 @@ export class DebugClient {
 
     if (message.type === "MouseWheel") {
       handleMouseWheelRequest(this, message);
+      return;
+    }
+
+    if (message.type === "MouseHover") {
+      handleMouseHoverRequest(this, message);
       return;
     }
 

@@ -1318,6 +1318,682 @@
     });
   }
 
+  // src/vite/client/ui/mouse-visualizer.js
+  var initialized = false;
+  var styleEl = null;
+  var styles = `
+.mcp-mouse-viz {
+  position: absolute;
+  pointer-events: none;
+  z-index: 99998;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, monospace;
+}
+
+/* ============================================
+   CLICK - Red/Pink theme
+   ============================================ */
+.mcp-click-ripple {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: rgba(20, 20, 20, 0.9);
+  border: 3px solid #ff4d6a;
+  transform: translate(-50%, -50%) scale(0.3);
+  animation: mcp-ripple 1.5s ease-out forwards;
+  box-shadow: 0 0 20px #ff4d6a, 0 0 40px rgba(255, 77, 106, 0.5);
+}
+
+.mcp-click-ripple::after {
+  content: 'CLICK';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  text-align: center;
+  color: #ff4d6a;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 10px #ff4d6a;
+  animation: mcp-label-fade 1.5s ease-out forwards;
+}
+
+@keyframes mcp-ripple {
+  0% {
+    transform: translate(-50%, -50%) scale(0.3);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2);
+    opacity: 0;
+  }
+}
+
+@keyframes mcp-label-fade {
+  0% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ============================================
+   HOVER - Green theme
+   Strict render order:
+   1) Crosshair STROKE + glow
+   2) Circle STROKE + glow
+   3) Crosshair FILL
+   4) Circle FILL
+   ============================================ */
+.mcp-hover-indicator {
+  width: 70px;
+  height: 70px;
+  transform: translate(-50%, -50%);
+  animation: mcp-hover-in 0.3s ease-out forwards;
+}
+
+/* 1. Crosshair STROKE + glow (no fill) */
+.mcp-hover-crosshair-stroke {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.mcp-hover-crosshair-stroke::before,
+.mcp-hover-crosshair-stroke::after {
+  content: '';
+  position: absolute;
+  background: #4ade80;
+  border-radius: 3px;
+  box-shadow: 0 0 12px #4ade80, 0 0 24px rgba(74, 222, 128, 0.5);
+}
+
+.mcp-hover-crosshair-stroke::before {
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 10px;
+  transform: translateY(-50%);
+}
+
+.mcp-hover-crosshair-stroke::after {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  transform: translateX(-50%);
+}
+
+/* 2. Circle STROKE + glow (no fill) */
+.mcp-hover-circle-stroke {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  background: #4ade80;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 12px #4ade80, 0 0 24px rgba(74, 222, 128, 0.5);
+}
+
+/* 3. Crosshair FILL (no stroke, no glow) */
+.mcp-hover-crosshair-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.mcp-hover-crosshair-fill::before,
+.mcp-hover-crosshair-fill::after {
+  content: '';
+  position: absolute;
+  background: rgba(20, 20, 20, 0.95);
+  border-radius: 2px;
+}
+
+.mcp-hover-crosshair-fill::before {
+  top: 50%;
+  left: 2px;
+  right: 2px;
+  height: 6px;
+  transform: translateY(-50%);
+}
+
+.mcp-hover-crosshair-fill::after {
+  left: 50%;
+  top: 2px;
+  bottom: 2px;
+  width: 6px;
+  transform: translateX(-50%);
+}
+
+/* 4. Circle FILL (no stroke, no glow) */
+.mcp-hover-circle-fill {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  background: rgba(20, 20, 20, 0.95);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* Label */
+.mcp-hover-label {
+  position: absolute;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 20, 0.95);
+  border: 2px solid #4ade80;
+  border-radius: 4px;
+  padding: 3px 8px;
+  color: #4ade80;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  box-shadow: 0 0 10px #4ade80, 0 0 20px rgba(74, 222, 128, 0.4);
+}
+
+@keyframes mcp-hover-in {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.3);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+.mcp-hover-indicator.fading {
+  animation: mcp-hover-out 0.5s ease-in forwards;
+}
+
+@keyframes mcp-hover-out {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.5);
+  }
+}
+
+/* ============================================
+   DRAG - Yellow/Orange theme
+   Strict render order:
+   1) All STROKES + glows (start, line, end)
+   2) All FILLS (start, line, end)
+   ============================================ */
+
+/* Stroke elements */
+.mcp-drag-start-stroke {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #fbbf24;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 16px #fbbf24, 0 0 32px rgba(251, 191, 36, 0.4);
+}
+
+.mcp-drag-line-stroke {
+  height: 6px;
+  margin-top: -3px;
+  background: #fbbf24;
+  border-radius: 3px;
+  transform-origin: left center;
+  box-shadow: 0 0 12px #fbbf24, 0 0 24px rgba(251, 191, 36, 0.4);
+  --line-angle: 0deg;
+}
+
+.mcp-drag-end-stroke {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #fbbf24;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 16px #fbbf24, 0 0 32px rgba(251, 191, 36, 0.4);
+}
+
+/* Fill elements */
+.mcp-drag-start-fill {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(20, 20, 20, 0.95);
+  transform: translate(-50%, -50%);
+}
+
+.mcp-drag-line-fill {
+  height: 2px;
+  margin-top: -1px;
+  background: rgba(20, 20, 20, 0.95);
+  border-radius: 1px;
+  transform-origin: left center;
+  --line-angle: 0deg;
+}
+
+.mcp-drag-end-fill {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(20, 20, 20, 0.95);
+  transform: translate(-50%, -50%);
+}
+
+/* Labels - positioned above circles (36px diameter = 18px radius) */
+.mcp-drag-label {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  margin-top: -22px;
+  background: rgba(20, 20, 20, 0.95);
+  border: 2px solid #fbbf24;
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: #fbbf24;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  box-shadow: 0 0 8px #fbbf24;
+}
+
+/* Center dot for end point */
+.mcp-drag-end-dot {
+  width: 10px;
+  height: 10px;
+  background: #fbbf24;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 8px #fbbf24;
+}
+
+@keyframes mcp-drag-pulse {
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+  50% { transform: translate(-50%, -50%) scale(1.2); }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+@keyframes mcp-drag-end-pop {
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+  60% { transform: translate(-50%, -50%) scale(1.3); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+
+@keyframes mcp-line-draw {
+  0% { transform: rotate(var(--line-angle)) scaleX(0); opacity: 0; }
+  100% { transform: rotate(var(--line-angle)) scaleX(1); opacity: 1; }
+}
+
+.mcp-drag-group.fading {
+  animation: mcp-fade-out 0.8s ease-in forwards;
+}
+
+@keyframes mcp-fade-out {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ============================================
+   WHEEL/SCROLL - Blue theme
+   ============================================ */
+.mcp-wheel-indicator {
+  width: 70px;
+  height: 70px;
+  transform: translate(-50%, -50%);
+  animation: mcp-wheel-in 0.2s ease-out forwards;
+}
+
+.mcp-wheel-indicator .mcp-wheel-circle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 3px solid #60a5fa;
+  border-radius: 50%;
+  background: rgba(20, 20, 20, 0.9);
+  box-shadow: 0 0 16px #60a5fa, 0 0 32px rgba(96, 165, 250, 0.4);
+}
+
+.mcp-wheel-indicator .mcp-wheel-arrow {
+  position: absolute;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  border-left: 3px solid #60a5fa;
+  border-top: 3px solid #60a5fa;
+  filter: drop-shadow(0 0 4px #60a5fa);
+}
+
+.mcp-wheel-indicator .mcp-wheel-arrow.up {
+  top: 10px;
+  transform: translateX(-50%) rotate(45deg);
+  transform-origin: center center;
+  animation: mcp-arrow-bounce-up 0.3s ease-out infinite;
+}
+
+.mcp-wheel-indicator .mcp-wheel-arrow.down {
+  bottom: 10px;
+  transform: translateX(-50%) rotate(-135deg);
+  transform-origin: center center;
+  animation: mcp-arrow-bounce-down 0.3s ease-out infinite;
+}
+
+.mcp-wheel-indicator .mcp-wheel-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #60a5fa;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-shadow: 0 0 8px #60a5fa;
+}
+
+@keyframes mcp-wheel-in {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes mcp-arrow-bounce-up {
+  0%, 100% { transform: translateX(-50%) translateY(0) rotate(45deg); }
+  50% { transform: translateX(-50%) translateY(-6px) rotate(45deg); }
+}
+
+@keyframes mcp-arrow-bounce-down {
+  0%, 100% { transform: translateX(-50%) translateY(0) rotate(-135deg); }
+  50% { transform: translateX(-50%) translateY(6px) rotate(-135deg); }
+}
+
+.mcp-wheel-indicator.fading {
+  animation: mcp-wheel-out 0.4s ease-in forwards;
+}
+
+@keyframes mcp-wheel-out {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+}
+`;
+  function init() {
+    if (initialized) return;
+    initialized = true;
+    styleEl = document.createElement("style");
+    styleEl.textContent = styles;
+    document.head.appendChild(styleEl);
+  }
+  function createEl(className) {
+    init();
+    const el = document.createElement("div");
+    el.className = `mcp-mouse-viz ${className}`;
+    document.body.appendChild(el);
+    return el;
+  }
+  function positionAt(el, x, y) {
+    el.style.left = `${x + window.scrollX}px`;
+    el.style.top = `${y + window.scrollY}px`;
+  }
+  function showClick(clientX, clientY) {
+    const el = createEl("mcp-click-ripple");
+    positionAt(el, clientX, clientY);
+    setTimeout(() => el.remove(), 1500);
+  }
+  function showHover(clientX, clientY) {
+    const el = createEl("mcp-hover-indicator");
+    const crosshairStroke = document.createElement("div");
+    crosshairStroke.className = "mcp-hover-crosshair-stroke";
+    el.appendChild(crosshairStroke);
+    const circleStroke = document.createElement("div");
+    circleStroke.className = "mcp-hover-circle-stroke";
+    el.appendChild(circleStroke);
+    const crosshairFill = document.createElement("div");
+    crosshairFill.className = "mcp-hover-crosshair-fill";
+    el.appendChild(crosshairFill);
+    const circleFill = document.createElement("div");
+    circleFill.className = "mcp-hover-circle-fill";
+    el.appendChild(circleFill);
+    const label = document.createElement("div");
+    label.className = "mcp-hover-label";
+    label.textContent = "HOVER";
+    el.appendChild(label);
+    positionAt(el, clientX, clientY);
+    const timeout = setTimeout(() => {
+      el.classList.add("fading");
+      setTimeout(() => el.remove(), 500);
+    }, 3e3);
+    return () => {
+      clearTimeout(timeout);
+      el.classList.add("fading");
+      setTimeout(() => el.remove(), 500);
+    };
+  }
+  function showDrag(startX, startY, endX, endY) {
+    const group = createEl("mcp-drag-group");
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const dx = endX - startX;
+    const dy = endY - startY;
+    const length = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    const startStroke = document.createElement("div");
+    startStroke.className = "mcp-drag-start-stroke";
+    startStroke.style.position = "absolute";
+    startStroke.style.left = `${startX + scrollX}px`;
+    startStroke.style.top = `${startY + scrollY}px`;
+    group.appendChild(startStroke);
+    const lineStroke = document.createElement("div");
+    lineStroke.className = "mcp-drag-line-stroke";
+    lineStroke.style.position = "absolute";
+    lineStroke.style.left = `${startX + scrollX}px`;
+    lineStroke.style.top = `${startY + scrollY}px`;
+    lineStroke.style.width = `${length}px`;
+    lineStroke.style.transform = `rotate(${angle}deg)`;
+    group.appendChild(lineStroke);
+    const endStroke = document.createElement("div");
+    endStroke.className = "mcp-drag-end-stroke";
+    endStroke.style.position = "absolute";
+    endStroke.style.left = `${endX + scrollX}px`;
+    endStroke.style.top = `${endY + scrollY}px`;
+    group.appendChild(endStroke);
+    const startFill = document.createElement("div");
+    startFill.className = "mcp-drag-start-fill";
+    startFill.style.position = "absolute";
+    startFill.style.left = `${startX + scrollX}px`;
+    startFill.style.top = `${startY + scrollY}px`;
+    group.appendChild(startFill);
+    const lineFill = document.createElement("div");
+    lineFill.className = "mcp-drag-line-fill";
+    lineFill.style.position = "absolute";
+    lineFill.style.left = `${startX + scrollX}px`;
+    lineFill.style.top = `${startY + scrollY}px`;
+    lineFill.style.width = `${length}px`;
+    lineFill.style.transform = `rotate(${angle}deg)`;
+    group.appendChild(lineFill);
+    const endFill = document.createElement("div");
+    endFill.className = "mcp-drag-end-fill";
+    endFill.style.position = "absolute";
+    endFill.style.left = `${endX + scrollX}px`;
+    endFill.style.top = `${endY + scrollY}px`;
+    group.appendChild(endFill);
+    const startLabel = document.createElement("div");
+    startLabel.className = "mcp-drag-label";
+    startLabel.textContent = "START";
+    startLabel.style.position = "absolute";
+    startLabel.style.left = `${startX + scrollX}px`;
+    startLabel.style.top = `${startY + scrollY}px`;
+    group.appendChild(startLabel);
+    const endLabel = document.createElement("div");
+    endLabel.className = "mcp-drag-label";
+    endLabel.textContent = "END";
+    endLabel.style.position = "absolute";
+    endLabel.style.left = `${endX + scrollX}px`;
+    endLabel.style.top = `${endY + scrollY}px`;
+    group.appendChild(endLabel);
+    const endDot = document.createElement("div");
+    endDot.className = "mcp-drag-end-dot";
+    endDot.style.position = "absolute";
+    endDot.style.left = `${endX + scrollX}px`;
+    endDot.style.top = `${endY + scrollY}px`;
+    group.appendChild(endDot);
+    setTimeout(() => {
+      group.classList.add("fading");
+      setTimeout(() => group.remove(), 800);
+    }, 3e3);
+  }
+  function startLiveDrag(startX, startY) {
+    init();
+    const group = document.createElement("div");
+    group.className = "mcp-mouse-viz mcp-drag-group";
+    document.body.appendChild(group);
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const startStroke = document.createElement("div");
+    startStroke.className = "mcp-drag-start-stroke";
+    startStroke.style.position = "absolute";
+    startStroke.style.left = `${startX + scrollX}px`;
+    startStroke.style.top = `${startY + scrollY}px`;
+    group.appendChild(startStroke);
+    const lineStroke = document.createElement("div");
+    lineStroke.className = "mcp-drag-line-stroke";
+    lineStroke.style.position = "absolute";
+    lineStroke.style.left = `${startX + scrollX}px`;
+    lineStroke.style.top = `${startY + scrollY}px`;
+    lineStroke.style.width = "0px";
+    lineStroke.style.transform = "rotate(0deg)";
+    group.appendChild(lineStroke);
+    const endStroke = document.createElement("div");
+    endStroke.className = "mcp-drag-end-stroke";
+    endStroke.style.position = "absolute";
+    endStroke.style.left = `${startX + scrollX}px`;
+    endStroke.style.top = `${startY + scrollY}px`;
+    endStroke.style.opacity = "0";
+    group.appendChild(endStroke);
+    const startFill = document.createElement("div");
+    startFill.className = "mcp-drag-start-fill";
+    startFill.style.position = "absolute";
+    startFill.style.left = `${startX + scrollX}px`;
+    startFill.style.top = `${startY + scrollY}px`;
+    group.appendChild(startFill);
+    const lineFill = document.createElement("div");
+    lineFill.className = "mcp-drag-line-fill";
+    lineFill.style.position = "absolute";
+    lineFill.style.left = `${startX + scrollX}px`;
+    lineFill.style.top = `${startY + scrollY}px`;
+    lineFill.style.width = "0px";
+    lineFill.style.transform = "rotate(0deg)";
+    group.appendChild(lineFill);
+    const endFill = document.createElement("div");
+    endFill.className = "mcp-drag-end-fill";
+    endFill.style.position = "absolute";
+    endFill.style.left = `${startX + scrollX}px`;
+    endFill.style.top = `${startY + scrollY}px`;
+    endFill.style.opacity = "0";
+    group.appendChild(endFill);
+    const startLabel = document.createElement("div");
+    startLabel.className = "mcp-drag-label";
+    startLabel.textContent = "START";
+    startLabel.style.position = "absolute";
+    startLabel.style.left = `${startX + scrollX}px`;
+    startLabel.style.top = `${startY + scrollY}px`;
+    group.appendChild(startLabel);
+    const endLabel = document.createElement("div");
+    endLabel.className = "mcp-drag-label";
+    endLabel.textContent = "END";
+    endLabel.style.position = "absolute";
+    endLabel.style.opacity = "0";
+    group.appendChild(endLabel);
+    const endDot = document.createElement("div");
+    endDot.className = "mcp-drag-end-dot";
+    endDot.style.position = "absolute";
+    endDot.style.opacity = "0";
+    group.appendChild(endDot);
+    return {
+      /**
+       * Update the drag line to current position
+       */
+      update(currentX, currentY) {
+        const dx = currentX - startX;
+        const dy = currentY - startY;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        lineStroke.style.width = `${length}px`;
+        lineStroke.style.transform = `rotate(${angle}deg)`;
+        lineFill.style.width = `${length}px`;
+        lineFill.style.transform = `rotate(${angle}deg)`;
+      },
+      /**
+       * Complete the drag - show end point and schedule fade out
+       */
+      end(endX, endY) {
+        const dx = endX - startX;
+        const dy = endY - startY;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        lineStroke.style.width = `${length}px`;
+        lineStroke.style.transform = `rotate(${angle}deg)`;
+        lineFill.style.width = `${length}px`;
+        lineFill.style.transform = `rotate(${angle}deg)`;
+        endStroke.style.left = `${endX + scrollX}px`;
+        endStroke.style.top = `${endY + scrollY}px`;
+        endStroke.style.opacity = "1";
+        endFill.style.left = `${endX + scrollX}px`;
+        endFill.style.top = `${endY + scrollY}px`;
+        endFill.style.opacity = "1";
+        endLabel.style.left = `${endX + scrollX}px`;
+        endLabel.style.top = `${endY + scrollY}px`;
+        endLabel.style.opacity = "1";
+        endDot.style.left = `${endX + scrollX}px`;
+        endDot.style.top = `${endY + scrollY}px`;
+        endDot.style.opacity = "1";
+        setTimeout(() => {
+          group.classList.add("fading");
+          setTimeout(() => group.remove(), 800);
+        }, 2e3);
+      },
+      /**
+       * Cancel/remove the visualization
+       */
+      cancel() {
+        group.remove();
+      }
+    };
+  }
+  function showWheel(clientX, clientY, deltaY) {
+    const el = createEl("mcp-wheel-indicator");
+    positionAt(el, clientX, clientY);
+    const circle = document.createElement("div");
+    circle.className = "mcp-wheel-circle";
+    el.appendChild(circle);
+    const arrow = document.createElement("div");
+    arrow.className = `mcp-wheel-arrow ${deltaY > 0 ? "down" : "up"}`;
+    el.appendChild(arrow);
+    const label = document.createElement("div");
+    label.className = "mcp-wheel-label";
+    label.textContent = "SCROLL";
+    el.appendChild(label);
+    setTimeout(() => {
+      el.classList.add("fading");
+      setTimeout(() => el.remove(), 400);
+    }, 1500);
+  }
+  if (typeof window !== "undefined") {
+    window.__mcpMouseViz = { showClick, showHover, showDrag, showWheel };
+  }
+
   // src/vite/client/handlers/mouse.js
   function getMouseEventTarget(selector, x = 0, y = 0) {
     let target = document.body;
@@ -1363,6 +2039,7 @@
       target.dispatchEvent(new MouseEvent("mousedown", eventInit));
       target.dispatchEvent(new MouseEvent("mouseup", eventInit));
       target.dispatchEvent(new MouseEvent("click", eventInit));
+      showClick(clientX, clientY);
       client.send({
         type: "mouse_response",
         requestId: message.requestId,
@@ -1414,6 +2091,7 @@
         screenX: startClientX,
         screenY: startClientY
       };
+      const dragViz = startLiveDrag(startClientX, startClientY);
       target.dispatchEvent(new MouseEvent("mousedown", eventInit));
       const startTime = performance.now();
       let moveCount = 0;
@@ -1422,6 +2100,7 @@
         const t = Math.min(elapsed / duration, 1);
         const currentX = startClientX + (endClientX - startClientX) * t;
         const currentY = startClientY + (endClientY - startClientY) * t;
+        dragViz.update(currentX, currentY);
         window.dispatchEvent(
           new MouseEvent("mousemove", {
             ...eventInit,
@@ -1444,6 +2123,7 @@
               screenY: endClientY
             })
           );
+          dragViz.end(endClientX, endClientY);
           client.send({
             type: "mouse_response",
             requestId: message.requestId,
@@ -1481,6 +2161,7 @@
         return;
       }
       const { target, clientX, clientY } = result;
+      showWheel(clientX, clientY, deltaY);
       const steps = Math.max(1, Math.round(duration / 16));
       const stepDeltaX = deltaX / steps;
       const stepDeltaY = deltaY / steps;
@@ -1513,6 +2194,61 @@
         }
       };
       sendWheelEvent();
+    } catch (error) {
+      client.send({
+        type: "mouse_response",
+        requestId: message.requestId,
+        success: false,
+        error: error.message
+      });
+    }
+  }
+  function handleMouseHoverRequest(client, message) {
+    const { selector, x = 0, y = 0 } = message;
+    try {
+      const result = getMouseEventTarget(selector, x, y);
+      if (result.error) {
+        client.send({
+          type: "mouse_response",
+          requestId: message.requestId,
+          success: false,
+          error: result.error
+        });
+        return;
+      }
+      const { target, clientX, clientY } = result;
+      const eventInit = {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        clientX,
+        clientY,
+        screenX: clientX,
+        screenY: clientY
+      };
+      const pointerInit = {
+        ...eventInit,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+        width: 1,
+        height: 1,
+        pressure: 0
+      };
+      target.dispatchEvent(new PointerEvent("pointerenter", { ...pointerInit, bubbles: false }));
+      target.dispatchEvent(new PointerEvent("pointerover", pointerInit));
+      target.dispatchEvent(new PointerEvent("pointermove", pointerInit));
+      target.dispatchEvent(new MouseEvent("mouseenter", { ...eventInit, bubbles: false }));
+      target.dispatchEvent(new MouseEvent("mouseover", eventInit));
+      target.dispatchEvent(new MouseEvent("mousemove", eventInit));
+      showHover(clientX, clientY);
+      client.send({
+        type: "mouse_response",
+        requestId: message.requestId,
+        success: true,
+        clientX,
+        clientY
+      });
     } catch (error) {
       client.send({
         type: "mouse_response",
@@ -1684,6 +2420,454 @@
     };
   }
 
+  // src/vite/client/ui/event-log.js
+  var TOAST_DURATION = 2500;
+  var MAX_EVENTS = 50;
+  var MOUSE_EVENTS = ["MouseClick", "MouseHover", "MouseDrag", "MouseWheel"];
+  var container = null;
+  var toastContainer = null;
+  var historyPanel = null;
+  var toggleButton = null;
+  var expanded = false;
+  var events = [];
+  var styles2 = `
+.mcp-event-log {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 99999;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, monospace;
+  font-size: 11px;
+  pointer-events: none;
+}
+
+.mcp-event-log * {
+  box-sizing: border-box;
+}
+
+.mcp-event-log-toggle {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(30, 30, 30, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.mcp-event-log-toggle:hover {
+  background: rgba(50, 50, 50, 0.95);
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.mcp-event-log-toggle.expanded {
+  background: rgba(60, 60, 60, 0.95);
+  color: #6ee7b7;
+}
+
+.mcp-event-log-toasts {
+  position: absolute;
+  bottom: 36px;
+  right: 0;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.mcp-toast {
+  background: rgba(30, 30, 30, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #6ee7b7;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: mcp-toast-in 0.2s ease-out;
+  transform-origin: bottom right;
+}
+
+.mcp-toast.fading {
+  animation: mcp-toast-out 0.3s ease-in forwards;
+}
+
+@keyframes mcp-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes mcp-toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(10px) scale(0.95);
+  }
+}
+
+.mcp-event-log-history {
+  pointer-events: auto;
+  position: absolute;
+  bottom: 36px;
+  right: 0;
+  width: 320px;
+  max-height: 400px;
+  background: rgba(24, 24, 24, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow: hidden;
+  display: none;
+  flex-direction: column;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.mcp-event-log-history.visible {
+  display: flex;
+}
+
+.mcp-event-log-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.mcp-event-log-clear {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
+.mcp-event-log-clear:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.mcp-event-log-list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.mcp-event-log-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.mcp-event-log-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mcp-event-log-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.mcp-event-log-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.mcp-event-item {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.mcp-event-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.mcp-event-item:last-child {
+  border-bottom: none;
+}
+
+.mcp-event-summary {
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.mcp-event-name {
+  color: #6ee7b7;
+  font-weight: 500;
+}
+
+.mcp-event-time {
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 10px;
+}
+
+.mcp-event-args {
+  display: none;
+  padding: 0 12px 10px 12px;
+}
+
+.mcp-event-item.expanded .mcp-event-args {
+  display: block;
+}
+
+.mcp-event-args pre {
+  margin: 0;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 10px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.mcp-event-empty {
+  padding: 24px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.mcp-event-item.replayable .mcp-event-summary {
+  position: relative;
+}
+
+.mcp-event-item.replayable .mcp-event-name::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 6px;
+  opacity: 0.5;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.mcp-event-item.replayable:hover .mcp-event-name::before {
+  opacity: 1;
+  transform: scale(1.3);
+}
+
+.mcp-event-item.replayable::after {
+  content: 'hover to replay';
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.25);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.mcp-event-item.replayable:hover::after {
+  opacity: 1;
+}
+`;
+  function formatTime(timestamp) {
+    const d = new Date(timestamp);
+    return d.toLocaleTimeString("en-US", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+  }
+  function formatArgs(args) {
+    try {
+      const cleaned = { ...args };
+      delete cleaned.requestId;
+      delete cleaned.timestamp;
+      delete cleaned.sessionId;
+      delete cleaned.type;
+      if (Object.keys(cleaned).length === 0) {
+        return null;
+      }
+      return JSON.stringify(cleaned, null, 2);
+    } catch (e) {
+      return String(args);
+    }
+  }
+  function getAbsoluteCoords(selector, x = 0, y = 0) {
+    let clientX = x;
+    let clientY = y;
+    if (selector) {
+      const el = document.querySelector(selector);
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        clientX = rect.left + x;
+        clientY = rect.top + y;
+      }
+    }
+    return { clientX, clientY };
+  }
+  function replayMouseEvent(event) {
+    const args = event.args;
+    switch (event.name) {
+      case "MouseClick": {
+        const { clientX, clientY } = getAbsoluteCoords(args.selector, args.x, args.y);
+        showClick(clientX, clientY);
+        break;
+      }
+      case "MouseHover": {
+        const { clientX, clientY } = getAbsoluteCoords(args.selector, args.x, args.y);
+        showHover(clientX, clientY);
+        break;
+      }
+      case "MouseDrag": {
+        const start = getAbsoluteCoords(args.selector, args.startX, args.startY);
+        const end = getAbsoluteCoords(args.selector, args.endX, args.endY);
+        showDrag(start.clientX, start.clientY, end.clientX, end.clientY);
+        break;
+      }
+      case "MouseWheel": {
+        const { clientX, clientY } = getAbsoluteCoords(args.selector, args.x, args.y);
+        showWheel(clientX, clientY, args.deltaY || 0);
+        break;
+      }
+    }
+  }
+  function createToast(eventName) {
+    const toast = document.createElement("div");
+    toast.className = "mcp-toast";
+    toast.textContent = eventName;
+    toastContainer.appendChild(toast);
+    setTimeout(() => {
+      toast.classList.add("fading");
+      setTimeout(() => toast.remove(), 300);
+    }, TOAST_DURATION);
+  }
+  function renderHistory() {
+    if (!historyPanel) return;
+    const list = historyPanel.querySelector(".mcp-event-log-list");
+    if (!list) return;
+    if (events.length === 0) {
+      list.innerHTML = '<div class="mcp-event-empty">No events yet</div>';
+      return;
+    }
+    list.innerHTML = events.map((event, index) => {
+      const argsStr = formatArgs(event.args);
+      const isReplayable = MOUSE_EVENTS.includes(event.name);
+      return `
+      <div class="mcp-event-item${isReplayable ? " replayable" : ""}" data-index="${index}">
+        <div class="mcp-event-summary">
+          <span class="mcp-event-name">${event.name}</span>
+          <span class="mcp-event-time">${formatTime(event.timestamp)}</span>
+        </div>
+        ${argsStr ? `<div class="mcp-event-args"><pre>${argsStr}</pre></div>` : ""}
+      </div>
+    `;
+    }).join("");
+    list.querySelectorAll(".mcp-event-item").forEach((item) => {
+      const index = parseInt(item.dataset.index, 10);
+      const event = events[index];
+      item.addEventListener("click", () => {
+        item.classList.toggle("expanded");
+      });
+      if (MOUSE_EVENTS.includes(event.name)) {
+        item.addEventListener("mouseenter", () => {
+          replayMouseEvent(event);
+        });
+      }
+    });
+  }
+  function toggleExpanded() {
+    expanded = !expanded;
+    toggleButton.classList.toggle("expanded", expanded);
+    historyPanel.classList.toggle("visible", expanded);
+    toastContainer.style.display = expanded ? "none" : "flex";
+    if (expanded) {
+      renderHistory();
+    }
+  }
+  function clearHistory() {
+    events = [];
+    renderHistory();
+  }
+  function init2() {
+    if (container) return;
+    const styleEl2 = document.createElement("style");
+    styleEl2.textContent = styles2;
+    document.head.appendChild(styleEl2);
+    container = document.createElement("div");
+    container.className = "mcp-event-log";
+    toastContainer = document.createElement("div");
+    toastContainer.className = "mcp-event-log-toasts";
+    container.appendChild(toastContainer);
+    historyPanel = document.createElement("div");
+    historyPanel.className = "mcp-event-log-history";
+    historyPanel.innerHTML = `
+    <div class="mcp-event-log-header">
+      <span>MCP Events</span>
+      <button class="mcp-event-log-clear">Clear</button>
+    </div>
+    <div class="mcp-event-log-list"></div>
+  `;
+    container.appendChild(historyPanel);
+    toggleButton = document.createElement("button");
+    toggleButton.className = "mcp-event-log-toggle";
+    toggleButton.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`;
+    toggleButton.addEventListener("click", toggleExpanded);
+    container.appendChild(toggleButton);
+    historyPanel.querySelector(".mcp-event-log-clear").addEventListener("click", (e) => {
+      e.stopPropagation();
+      clearHistory();
+    });
+    document.body.appendChild(container);
+  }
+  function logEvent(eventName, args = {}) {
+    init2();
+    events.unshift({
+      name: eventName,
+      args,
+      timestamp: Date.now()
+    });
+    if (events.length > MAX_EVENTS) {
+      events = events.slice(0, MAX_EVENTS);
+    }
+    if (!expanded) {
+      createToast(eventName);
+    } else {
+      renderHistory();
+    }
+  }
+  function getEventLog() {
+    return { events, expanded, container };
+  }
+  if (typeof window !== "undefined") {
+    window.__mcpEventLog = { getEventLog };
+  }
+
   // src/vite/client/client.js
   var RECONNECT_INTERVAL = 2e3;
   var SESSION_TIMEOUT = 5e3;
@@ -1786,6 +2970,9 @@
         window.location.reload();
         return;
       }
+      if (message.type) {
+        logEvent(message.type, message);
+      }
       if (message.type === "GetValue") {
         handleGetValueRequest(this, message);
         return;
@@ -1852,6 +3039,10 @@
       }
       if (message.type === "MouseWheel") {
         handleMouseWheelRequest(this, message);
+        return;
+      }
+      if (message.type === "MouseHover") {
+        handleMouseHoverRequest(this, message);
         return;
       }
       if (message.type === "SendKeys") {

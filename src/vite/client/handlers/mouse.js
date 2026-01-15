@@ -2,6 +2,8 @@
  * Mouse event handlers (MouseClick, MouseDrag, MouseWheel)
  */
 
+import { showClick, showHover, showDrag, showWheel, startLiveDrag } from "../ui/mouse-visualizer.js";
+
 /**
  * Get element and compute absolute coordinates for mouse events
  */
@@ -59,6 +61,9 @@ export function handleMouseClickRequest(client, message) {
     target.dispatchEvent(new MouseEvent("mousedown", eventInit));
     target.dispatchEvent(new MouseEvent("mouseup", eventInit));
     target.dispatchEvent(new MouseEvent("click", eventInit));
+
+    // Show click visualization
+    showClick(clientX, clientY);
 
     client.send({
       type: "mouse_response",
@@ -120,6 +125,9 @@ export function handleMouseDragRequest(client, message) {
       screenY: startClientY,
     };
 
+    // Start live drag visualization
+    const dragViz = startLiveDrag(startClientX, startClientY);
+
     // d3-zoom listens for mousedown on the element
     target.dispatchEvent(new MouseEvent("mousedown", eventInit));
 
@@ -133,6 +141,9 @@ export function handleMouseDragRequest(client, message) {
       // Linear interpolation
       const currentX = startClientX + (endClientX - startClientX) * t;
       const currentY = startClientY + (endClientY - startClientY) * t;
+
+      // Update drag visualization
+      dragViz.update(currentX, currentY);
 
       // d3-zoom listens for mousemove on window (event.view)
       window.dispatchEvent(
@@ -159,6 +170,9 @@ export function handleMouseDragRequest(client, message) {
             screenY: endClientY,
           })
         );
+
+        // Complete drag visualization
+        dragViz.end(endClientX, endClientY);
 
         client.send({
           type: "mouse_response",
@@ -206,6 +220,9 @@ export function handleMouseWheelRequest(client, message) {
 
     const { target, clientX, clientY } = result;
 
+    // Show wheel visualization
+    showWheel(clientX, clientY, deltaY);
+
     // Send multiple small wheel events for smooth animation
     // Use ~60fps timing (16ms per frame)
     const steps = Math.max(1, Math.round(duration / 16));
@@ -242,6 +259,84 @@ export function handleMouseWheelRequest(client, message) {
     };
 
     sendWheelEvent();
+  } catch (error) {
+    client.send({
+      type: "mouse_response",
+      requestId: message.requestId,
+      success: false,
+      error: error.message,
+    });
+  }
+}
+
+/**
+ * Handle MouseHover request - simulate mouse hover
+ * Dispatches mouseenter, mouseover, and mousemove events to trigger hover states
+ * Also dispatches pointer events for frameworks that use them
+ */
+export function handleMouseHoverRequest(client, message) {
+  const { selector, x = 0, y = 0 } = message;
+
+  try {
+    const result = getMouseEventTarget(selector, x, y);
+    if (result.error) {
+      client.send({
+        type: "mouse_response",
+        requestId: message.requestId,
+        success: false,
+        error: result.error,
+      });
+      return;
+    }
+
+    const { target, clientX, clientY } = result;
+
+    const eventInit = {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      clientX,
+      clientY,
+      screenX: clientX,
+      screenY: clientY,
+    };
+
+    const pointerInit = {
+      ...eventInit,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+      width: 1,
+      height: 1,
+      pressure: 0,
+    };
+
+    // Dispatch pointer events first (for frameworks that use them)
+    // pointerenter doesn't bubble
+    target.dispatchEvent(new PointerEvent("pointerenter", { ...pointerInit, bubbles: false }));
+    // pointerover bubbles
+    target.dispatchEvent(new PointerEvent("pointerover", pointerInit));
+    // pointermove at the position
+    target.dispatchEvent(new PointerEvent("pointermove", pointerInit));
+
+    // Also dispatch mouse events for compatibility
+    // mouseenter doesn't bubble
+    target.dispatchEvent(new MouseEvent("mouseenter", { ...eventInit, bubbles: false }));
+    // mouseover bubbles
+    target.dispatchEvent(new MouseEvent("mouseover", eventInit));
+    // mousemove at the position
+    target.dispatchEvent(new MouseEvent("mousemove", eventInit));
+
+    // Show hover visualization
+    showHover(clientX, clientY);
+
+    client.send({
+      type: "mouse_response",
+      requestId: message.requestId,
+      success: true,
+      clientX,
+      clientY,
+    });
   } catch (error) {
     client.send({
       type: "mouse_response",
