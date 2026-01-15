@@ -3097,6 +3097,12 @@
       e.stopPropagation();
       clearHistory();
     });
+    document.addEventListener("click", (e) => {
+      if (!expanded) return;
+      if (!container.contains(e.target)) {
+        toggleExpanded();
+      }
+    });
     document.body.appendChild(container);
   }
   function logEvent(eventName, args = {}) {

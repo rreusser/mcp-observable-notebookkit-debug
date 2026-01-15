@@ -772,6 +772,16 @@ function init() {
     clearHistory();
   });
 
+  // Outer click handler to close the panel
+  document.addEventListener('click', (e) => {
+    if (!expanded) return;
+
+    // Check if click is outside the event log UI
+    if (!container.contains(e.target)) {
+      toggleExpanded();
+    }
+  });
+
   document.body.appendChild(container);
 }
 
