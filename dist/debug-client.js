@@ -2502,6 +2502,12 @@
   transform-origin: bottom right;
 }
 
+.mcp-toast-label {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.9em;
+  margin-left: 4px;
+}
+
 .mcp-toast.fading {
   animation: mcp-toast-out 0.3s ease-in forwards;
 }
@@ -2627,6 +2633,13 @@
   font-weight: 500;
 }
 
+.mcp-event-label {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 0.9em;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
 .mcp-event-time {
   color: rgba(255, 255, 255, 0.3);
   font-size: 10px;
@@ -2744,10 +2757,14 @@
       }
     }
   }
-  function createToast(eventName) {
+  function createToast(eventName, label) {
     const toast = document.createElement("div");
     toast.className = "mcp-toast";
-    toast.textContent = eventName;
+    if (label) {
+      toast.innerHTML = `${eventName}<span class="mcp-toast-label">(${label})</span>`;
+    } else {
+      toast.textContent = eventName;
+    }
     toastContainer.appendChild(toast);
     setTimeout(() => {
       toast.classList.add("fading");
@@ -2765,10 +2782,11 @@
     list.innerHTML = events.map((event, index) => {
       const argsStr = formatArgs(event.args);
       const isReplayable = MOUSE_EVENTS.includes(event.name);
+      const labelHtml = event.label ? `<span class="mcp-event-label">(${event.label})</span>` : "";
       return `
       <div class="mcp-event-item${isReplayable ? " replayable" : ""}" data-index="${index}">
         <div class="mcp-event-summary">
-          <span class="mcp-event-name">${event.name}</span>
+          <span class="mcp-event-name">${event.name}${labelHtml}</span>
           <span class="mcp-event-time">${formatTime(event.timestamp)}</span>
         </div>
         ${argsStr ? `<div class="mcp-event-args"><pre>${argsStr}</pre></div>` : ""}
@@ -2834,16 +2852,18 @@
   }
   function logEvent(eventName, args = {}) {
     init2();
+    const label = args.label;
     events.unshift({
       name: eventName,
       args,
+      label,
       timestamp: Date.now()
     });
     if (events.length > MAX_EVENTS) {
       events = events.slice(0, MAX_EVENTS);
     }
     if (!expanded) {
-      createToast(eventName);
+      createToast(eventName, label);
     } else {
       renderHistory();
     }
@@ -2925,6 +2945,7 @@
         this.ws.onopen = () => {
           this.connected = true;
           console.log("[DebugClient] Connected to MCP server at", wsUrl);
+          init2();
           while (this.messageQueue.length > 0) {
             const msg = this.messageQueue.shift();
             this.ws.send(msg);

@@ -13,7 +13,7 @@ import { handleEvalRequest } from "./handlers/eval.js";
 import { handleDefineVariableRequest, handleDeleteVariableRequest, handleListInjectedVariablesRequest } from "./handlers/variables.js";
 import { handleMouseClickRequest, handleMouseDragRequest, handleMouseWheelRequest, handleMouseHoverRequest } from "./handlers/mouse.js";
 import { handleSendKeysRequest } from "./handlers/keyboard.js";
-import { logEvent } from "./ui/event-log.js";
+import { logEvent, initEventLog } from "./ui/event-log.js";
 
 const RECONNECT_INTERVAL = 2000;
 const SESSION_TIMEOUT = 5000;
@@ -99,6 +99,9 @@ export class DebugClient {
       this.ws.onopen = () => {
         this.connected = true;
         console.log("[DebugClient] Connected to MCP server at", wsUrl);
+
+        // Show the event log overlay as soon as we connect
+        initEventLog();
 
         while (this.messageQueue.length > 0) {
           const msg = this.messageQueue.shift();

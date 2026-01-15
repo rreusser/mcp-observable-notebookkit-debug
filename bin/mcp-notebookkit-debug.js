@@ -486,7 +486,7 @@ async function requestValuesList(timeout = DEFAULT_TIMEOUT, notebook = null) {
  * Request value metadata from browser
  */
 async function requestValueMetadata(name, timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('GetValueMetadata', { name }, timeout, notebook);
+  return createRequest('GetValueMetadata', { name, label: name }, timeout, notebook);
 }
 
 /**
@@ -500,7 +500,7 @@ async function requestErrors(timeout = DEFAULT_TIMEOUT, notebook = null) {
  * Request to set an input value in browser
  */
 async function requestSetInput(name, value, timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('SetInput', { name, value }, timeout, notebook);
+  return createRequest('SetInput', { name, value, label: name }, timeout, notebook);
 }
 
 /**
@@ -556,21 +556,21 @@ async function requestMouseHover(params, timeout = DEFAULT_TIMEOUT, notebook = n
  * Request keyboard input in browser
  */
 async function requestSendKeys(keys, selector, modifiers, timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('SendKeys', { keys, selector, modifiers }, timeout, notebook);
+  return createRequest('SendKeys', { keys, selector, modifiers, label: keys }, timeout, notebook);
 }
 
 /**
  * Request to define an ephemeral variable in the runtime
  */
 async function requestDefineVariable(name, inputs, expression, timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('DefineVariable', { name, inputs, expression }, timeout, notebook);
+  return createRequest('DefineVariable', { name, inputs, expression, label: name }, timeout, notebook);
 }
 
 /**
  * Request to delete an injected variable
  */
 async function requestDeleteVariable(name, timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('DeleteVariable', { name }, timeout, notebook);
+  return createRequest('DeleteVariable', { name, label: name }, timeout, notebook);
 }
 
 /**
@@ -860,6 +860,12 @@ const notebookParam = {
   description: 'Target notebook (URL, path like "index" or "second-notebook", or index like "0"). Required when multiple notebooks are connected.'
 };
 
+// Common label parameter for all tools
+const labelParam = {
+  type: 'string',
+  description: 'Optional label describing the intent of this action (e.g., "expand plot", "zoom in"). Displayed in the notebook\'s event log overlay.'
+};
+
 // List available tools
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -1099,6 +1105,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             notebook: notebookParam,
+            label: labelParam,
             code: {
               type: 'string',
               description: 'JavaScript code to execute. The result of the last expression is returned.'
@@ -1119,6 +1126,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             notebook: notebookParam,
+            label: labelParam,
             selector: {
               type: 'string',
               description: 'CSS selector for target element. If provided, position is relative to element.'
@@ -1151,6 +1159,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             notebook: notebookParam,
+            label: labelParam,
             selector: {
               type: 'string',
               description: 'CSS selector for target element. If provided, positions are relative to element.'
@@ -1200,6 +1209,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             notebook: notebookParam,
+            label: labelParam,
             selector: {
               type: 'string',
               description: 'CSS selector for target element. If provided, position is relative to element.'
@@ -1242,6 +1252,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             notebook: notebookParam,
+            label: labelParam,
             selector: {
               type: 'string',
               description: 'CSS selector for target element. If provided, position is relative to element.'
