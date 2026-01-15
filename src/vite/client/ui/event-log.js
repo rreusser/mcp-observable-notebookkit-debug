@@ -265,22 +265,6 @@ const styles = `
   transform: scale(1.3);
 }
 
-.mcp-event-item.replayable::after {
-  content: 'hover to replay';
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 9px;
-  color: rgba(255, 255, 255, 0.25);
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  pointer-events: none;
-}
-
-.mcp-event-item.replayable:hover::after {
-  opacity: 1;
-}
 `;
 
 function formatTime(timestamp) {

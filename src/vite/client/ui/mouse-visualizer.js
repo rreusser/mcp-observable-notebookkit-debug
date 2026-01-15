@@ -18,14 +18,14 @@ const styles = `
    CLICK - Red/Pink theme
    ============================================ */
 .mcp-click-ripple {
-  width: 100px;
-  height: 100px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
   background: rgba(20, 20, 20, 0.9);
-  border: 3px solid #ff4d6a;
-  transform: translate(-50%, -50%) scale(0.3);
+  border: 2px solid #ff4d6a;
+  transform: translate(-50%, -50%) scale(0.25);
   animation: mcp-ripple 1.5s ease-out forwards;
-  box-shadow: 0 0 20px #ff4d6a, 0 0 40px rgba(255, 77, 106, 0.5);
+  box-shadow: 0 0 16px #ff4d6a, 0 0 32px rgba(255, 77, 106, 0.5);
 }
 
 .mcp-click-ripple::after {
@@ -37,7 +37,7 @@ const styles = `
   transform: translateY(-50%);
   text-align: center;
   color: #ff4d6a;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.5px;
   text-shadow: 0 0 10px #ff4d6a;
@@ -46,11 +46,14 @@ const styles = `
 
 @keyframes mcp-ripple {
   0% {
-    transform: translate(-50%, -50%) scale(0.3);
+    transform: translate(-50%, -50%) scale(0.35);
+    opacity: 1;
+  }
+  70% {
     opacity: 1;
   }
   100% {
-    transform: translate(-50%, -50%) scale(2);
+    transform: translate(-50%, -50%) scale(1.25);
     opacity: 0;
   }
 }
@@ -70,8 +73,8 @@ const styles = `
    4) Circle FILL
    ============================================ */
 .mcp-hover-indicator {
-  width: 70px;
-  height: 70px;
+  width: 40px;
+  height: 40px;
   transform: translate(-50%, -50%);
   animation: mcp-hover-in 0.3s ease-out forwards;
 }
@@ -98,7 +101,7 @@ const styles = `
   top: 50%;
   left: 0;
   right: 0;
-  height: 10px;
+  height: 6px;
   transform: translateY(-50%);
 }
 
@@ -106,7 +109,7 @@ const styles = `
   left: 50%;
   top: 0;
   bottom: 0;
-  width: 10px;
+  width: 6px;
   transform: translateX(-50%);
 }
 
@@ -115,12 +118,12 @@ const styles = `
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 24px;
-  height: 24px;
+  width: 14px;
+  height: 14px;
   background: #4ade80;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 12px #4ade80, 0 0 24px rgba(74, 222, 128, 0.5);
+  box-shadow: 0 0 8px #4ade80, 0 0 16px rgba(74, 222, 128, 0.5);
 }
 
 /* 3. Crosshair FILL (no stroke, no glow) */
@@ -142,17 +145,17 @@ const styles = `
 
 .mcp-hover-crosshair-fill::before {
   top: 50%;
-  left: 2px;
-  right: 2px;
-  height: 6px;
+  left: 1px;
+  right: 1px;
+  height: 2px;
   transform: translateY(-50%);
 }
 
 .mcp-hover-crosshair-fill::after {
   left: 50%;
-  top: 2px;
-  bottom: 2px;
-  width: 6px;
+  top: 1px;
+  bottom: 1px;
+  width: 2px;
   transform: translateX(-50%);
 }
 
@@ -161,8 +164,8 @@ const styles = `
   position: absolute;
   top: 50%;
   left: 50%;
-  width: 20px;
-  height: 20px;
+  width: 10px;
+  height: 10px;
   background: rgba(20, 20, 20, 0.95);
   border-radius: 50%;
   transform: translate(-50%, -50%);
@@ -171,19 +174,19 @@ const styles = `
 /* Label */
 .mcp-hover-label {
   position: absolute;
-  top: -28px;
+  top: -24px;
   left: 50%;
   transform: translateX(-50%);
   background: rgba(20, 20, 20, 0.95);
-  border: 2px solid #4ade80;
-  border-radius: 4px;
-  padding: 3px 8px;
+  border: 1.5px solid #4ade80;
+  border-radius: 3px;
+  padding: 2px 6px;
   color: #4ade80;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.5px;
   white-space: nowrap;
-  box-shadow: 0 0 10px #4ade80, 0 0 20px rgba(74, 222, 128, 0.4);
+  box-shadow: 0 0 8px #4ade80, 0 0 16px rgba(74, 222, 128, 0.4);
 }
 
 @keyframes mcp-hover-in {
@@ -221,84 +224,84 @@ const styles = `
 
 /* Stroke elements */
 .mcp-drag-start-stroke {
-  width: 36px;
-  height: 36px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #fbbf24;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 16px #fbbf24, 0 0 32px rgba(251, 191, 36, 0.4);
+  box-shadow: 0 0 10px #fbbf24, 0 0 20px rgba(251, 191, 36, 0.4);
 }
 
 .mcp-drag-line-stroke {
-  height: 6px;
-  margin-top: -3px;
+  height: 4px;
+  margin-top: -2px;
   background: #fbbf24;
-  border-radius: 3px;
+  border-radius: 2px;
   transform-origin: left center;
-  box-shadow: 0 0 12px #fbbf24, 0 0 24px rgba(251, 191, 36, 0.4);
+  box-shadow: 0 0 8px #fbbf24, 0 0 16px rgba(251, 191, 36, 0.4);
   --line-angle: 0deg;
 }
 
 .mcp-drag-end-stroke {
-  width: 36px;
-  height: 36px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #fbbf24;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 16px #fbbf24, 0 0 32px rgba(251, 191, 36, 0.4);
+  box-shadow: 0 0 10px #fbbf24, 0 0 20px rgba(251, 191, 36, 0.4);
 }
 
 /* Fill elements */
 .mcp-drag-start-fill {
-  width: 30px;
-  height: 30px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: rgba(20, 20, 20, 0.95);
   transform: translate(-50%, -50%);
 }
 
 .mcp-drag-line-fill {
-  height: 2px;
-  margin-top: -1px;
+  height: 1px;
+  margin-top: -0.5px;
   background: rgba(20, 20, 20, 0.95);
-  border-radius: 1px;
+  border-radius: 0.5px;
   transform-origin: left center;
   --line-angle: 0deg;
 }
 
 .mcp-drag-end-fill {
-  width: 30px;
-  height: 30px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: rgba(20, 20, 20, 0.95);
   transform: translate(-50%, -50%);
 }
 
-/* Labels - positioned above circles (36px diameter = 18px radius) */
+/* Labels - positioned above circles (20px diameter = 10px radius) */
 .mcp-drag-label {
   position: absolute;
   transform: translate(-50%, -100%);
-  margin-top: -22px;
+  margin-top: -14px;
   background: rgba(20, 20, 20, 0.95);
-  border: 2px solid #fbbf24;
-  border-radius: 4px;
-  padding: 2px 6px;
+  border: 1.5px solid #fbbf24;
+  border-radius: 3px;
+  padding: 2px 5px;
   color: #fbbf24;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.5px;
   white-space: nowrap;
-  box-shadow: 0 0 8px #fbbf24;
+  box-shadow: 0 0 6px #fbbf24;
 }
 
 /* Center dot for end point */
 .mcp-drag-end-dot {
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
   background: #fbbf24;
   border-radius: 50%;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 8px #fbbf24;
+  box-shadow: 0 0 5px #fbbf24;
 }
 
 @keyframes mcp-drag-pulse {
@@ -331,8 +334,8 @@ const styles = `
    WHEEL/SCROLL - Blue theme
    ============================================ */
 .mcp-wheel-indicator {
-  width: 70px;
-  height: 70px;
+  width: 55px;
+  height: 55px;
   transform: translate(-50%, -50%);
   animation: mcp-wheel-in 0.2s ease-out forwards;
 }
@@ -344,31 +347,31 @@ const styles = `
   width: 100%;
   height: 100%;
   box-sizing: border-box;
-  border: 3px solid #60a5fa;
+  border: 2px solid #60a5fa;
   border-radius: 50%;
   background: rgba(20, 20, 20, 0.9);
-  box-shadow: 0 0 16px #60a5fa, 0 0 32px rgba(96, 165, 250, 0.4);
+  box-shadow: 0 0 12px #60a5fa, 0 0 24px rgba(96, 165, 250, 0.4);
 }
 
 .mcp-wheel-indicator .mcp-wheel-arrow {
   position: absolute;
   left: 50%;
-  width: 14px;
-  height: 14px;
-  border-left: 3px solid #60a5fa;
-  border-top: 3px solid #60a5fa;
-  filter: drop-shadow(0 0 4px #60a5fa);
+  width: 10px;
+  height: 10px;
+  border-left: 2px solid #60a5fa;
+  border-top: 2px solid #60a5fa;
+  filter: drop-shadow(0 0 3px #60a5fa);
 }
 
 .mcp-wheel-indicator .mcp-wheel-arrow.up {
-  top: 10px;
+  top: 8px;
   transform: translateX(-50%) rotate(45deg);
   transform-origin: center center;
   animation: mcp-arrow-bounce-up 0.3s ease-out infinite;
 }
 
 .mcp-wheel-indicator .mcp-wheel-arrow.down {
-  bottom: 10px;
+  bottom: 8px;
   transform: translateX(-50%) rotate(-135deg);
   transform-origin: center center;
   animation: mcp-arrow-bounce-down 0.3s ease-out infinite;
@@ -384,10 +387,10 @@ const styles = `
   align-items: center;
   justify-content: center;
   color: #60a5fa;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.3px;
-  text-shadow: 0 0 8px #60a5fa;
+  text-shadow: 0 0 6px #60a5fa;
 }
 
 @keyframes mcp-wheel-in {
@@ -397,12 +400,12 @@ const styles = `
 
 @keyframes mcp-arrow-bounce-up {
   0%, 100% { transform: translateX(-50%) translateY(0) rotate(45deg); }
-  50% { transform: translateX(-50%) translateY(-6px) rotate(45deg); }
+  50% { transform: translateX(-50%) translateY(-4px) rotate(45deg); }
 }
 
 @keyframes mcp-arrow-bounce-down {
   0%, 100% { transform: translateX(-50%) translateY(0) rotate(-135deg); }
-  50% { transform: translateX(-50%) translateY(6px) rotate(-135deg); }
+  50% { transform: translateX(-50%) translateY(4px) rotate(-135deg); }
 }
 
 .mcp-wheel-indicator.fading {
