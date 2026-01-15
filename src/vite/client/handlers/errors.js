@@ -8,6 +8,7 @@ import { getRuntimeModule, getValueState } from "../utils/runtime.js";
  * Handle GetErrors request - get all errors from DOM and runtime
  */
 export async function handleGetErrorsRequest(client, message) {
+  const verbose = message.verbose || false;
   const errors = [];
 
   const errorSelectors = [
@@ -49,13 +50,17 @@ export async function handleGetErrorsRequest(client, message) {
       const result = await getValueState(runtime, name, 100);
       if (result.state === "rejected") {
         if (!errors.some((e) => e.cell === name)) {
-          errors.push({
+          const errorEntry = {
             cell: name,
             name: name,
             error: result.error,
-            stack: result.stack,
             source: "runtime",
-          });
+          };
+          // Only include stack trace when verbose is true
+          if (verbose && result.stack) {
+            errorEntry.stack = result.stack;
+          }
+          errors.push(errorEntry);
         }
       }
     }

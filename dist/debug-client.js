@@ -373,6 +373,7 @@
 
   // src/vite/client/handlers/errors.js
   async function handleGetErrorsRequest(client, message) {
+    const verbose = message.verbose || false;
     const errors = [];
     const errorSelectors = [
       ".observablehq--error",
@@ -403,13 +404,16 @@
         const result = await getValueState(runtime, name, 100);
         if (result.state === "rejected") {
           if (!errors.some((e) => e.cell === name)) {
-            errors.push({
+            const errorEntry = {
               cell: name,
               name,
               error: result.error,
-              stack: result.stack,
               source: "runtime"
-            });
+            };
+            if (verbose && result.stack) {
+              errorEntry.stack = result.stack;
+            }
+            errors.push(errorEntry);
           }
         }
       }

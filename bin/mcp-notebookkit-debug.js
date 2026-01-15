@@ -492,8 +492,8 @@ async function requestValueMetadata(name, timeout = DEFAULT_TIMEOUT, notebook = 
 /**
  * Request errors from browser
  */
-async function requestErrors(timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('GetErrors', {}, timeout, notebook);
+async function requestErrors(verbose = false, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('GetErrors', { verbose }, timeout, notebook);
 }
 
 /**
@@ -1002,6 +1002,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             notebook: notebookParam,
+            verbose: {
+              type: 'boolean',
+              description: 'Include full stack traces (default: false)',
+              default: false
+            },
             timeout_ms: {
               type: 'number',
               description: 'Maximum time to wait in milliseconds',
@@ -1595,9 +1600,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'GetErrors') {
-      const { notebook, timeout_ms = DEFAULT_TIMEOUT } = args || {};
+      const { notebook, verbose = false, timeout_ms = DEFAULT_TIMEOUT } = args || {};
 
-      const response = await requestErrors(timeout_ms, notebook);
+      const response = await requestErrors(verbose, timeout_ms, notebook);
 
       if (!response.success) {
         return {
@@ -1618,8 +1623,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const errorList = response.errors.map(e => {
         const name = e.name || e.cell;
         let msg = `Value: ${name}\nError: ${e.error}`;
-        if (e.stack) {
-          const stackLines = e.stack.split('\n').slice(0, 4).join('\n');
+        if (verbose && e.stack) {
+          const stackLines = e.stack.split('\n').slice(0, 6).join('\n');
           msg += `\nStack:\n${stackLines}`;
         }
         return msg;
