@@ -3186,6 +3186,8 @@
         this.sessionId = "session-" + Date.now();
       }
       this.connected = false;
+      this.connecting = false;
+      this.connectAttempts = 0;
       this.messageQueue = [];
       this.originalConsole = {};
       this.errorWatching = null;
@@ -3194,6 +3196,12 @@
       this.injectedVariables = /* @__PURE__ */ new Map();
     }
     init() {
+      window.addEventListener("beforeunload", () => {
+        if (this.ws) {
+          this.ws.onclose = null;
+          this.ws.close();
+        }
+      });
       this.connect();
       this.originalConsole = patchConsole(this.send.bind(this));
       this.errorWatching = setupErrorWatching(this.send.bind(this));
@@ -3234,11 +3242,47 @@
       }, 100);
     }
     connect() {
-      const wsUrl = `ws://localhost:${this.config.ws}`;
+      const wsUrl = `ws://${window.location.host}/__debug_ws`;
+      const MAX_CONNECT_ATTEMPTS = 5;
+      if (this.connecting) {
+        return;
+      }
+      this.connectAttempts++;
+      if (this.connectAttempts > MAX_CONNECT_ATTEMPTS) {
+        console.log("[DebugClient] Max connection attempts reached, giving up");
+        return;
+      }
+      this.connecting = true;
+      if (this.ws) {
+        try {
+          this.ws.onclose = null;
+          this.ws.onerror = null;
+          this.ws.onopen = null;
+          this.ws.onmessage = null;
+          this.ws.close();
+        } catch (e) {
+        }
+        this.ws = null;
+      }
       try {
+        console.log("[DebugClient] Connecting via Vite proxy:", wsUrl, `(attempt ${this.connectAttempts}/${MAX_CONNECT_ATTEMPTS})`);
         this.ws = new WebSocket(wsUrl);
+        const connectionTimeout = setTimeout(() => {
+          if (!this.connected && this.connecting) {
+            console.log("[DebugClient] Connection timeout, retrying...");
+            this.connecting = false;
+            try {
+              this.ws.close();
+            } catch (e) {
+            }
+            setTimeout(() => this.connect(), 500);
+          }
+        }, 3e3);
         this.ws.onopen = () => {
+          clearTimeout(connectionTimeout);
+          this.connecting = false;
           this.connected = true;
+          this.connectAttempts = 0;
           console.log("[DebugClient] Connected to MCP server at", wsUrl);
           init2();
           while (this.messageQueue.length > 0) {
@@ -3246,12 +3290,18 @@
             this.ws.send(msg);
           }
         };
-        this.ws.onclose = () => {
+        this.ws.onclose = (event) => {
+          clearTimeout(connectionTimeout);
+          const wasConnected = this.connected;
+          this.connecting = false;
           this.connected = false;
-          console.log("[DebugClient] Disconnected from MCP server, reconnecting in", RECONNECT_INTERVAL, "ms");
-          setTimeout(() => this.connect(), RECONNECT_INTERVAL);
+          if (wasConnected) {
+            console.log("[DebugClient] Disconnected from MCP server (code:", event.code, "reason:", event.reason || "none", "), reconnecting in", RECONNECT_INTERVAL, "ms");
+            setTimeout(() => this.connect(), RECONNECT_INTERVAL);
+          }
         };
         this.ws.onerror = (err) => {
+          clearTimeout(connectionTimeout);
           console.error("[DebugClient] WebSocket error:", err);
         };
         this.ws.onmessage = (event) => {
@@ -3384,13 +3434,19 @@
 
   // src/vite/client/index.js
   (function() {
-    if (window.location.hostname !== "localhost" && !window.location.hostname.match(/127\.0\.0\.1/)) {
-      return;
-    }
     const config = window.__NOTEBOOKKIT_DEBUG_CONFIG__ || { ws: 9899 };
-    console.log("[DebugClient] Config:", window.__NOTEBOOKKIT_DEBUG_CONFIG__, "-> Using port", config.ws);
+    let client = null;
     function initDebugClient() {
-      const client = new DebugClient(config);
+      if (client) {
+        try {
+          if (client.ws) {
+            client.ws.onclose = null;
+            client.ws.close();
+          }
+        } catch (e) {
+        }
+      }
+      client = new DebugClient(config);
       client.init();
     }
     if (document.readyState === "loading") {
@@ -3398,6 +3454,11 @@
     } else {
       initDebugClient();
     }
+    window.addEventListener("pageshow", (event) => {
+      if (event.persisted) {
+        initDebugClient();
+      }
+    });
   })();
 })();
 //# sourceMappingURL=debug-client.js.map

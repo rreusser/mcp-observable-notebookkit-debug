@@ -298,8 +298,8 @@ function createHttpServer() {
     }
   });
 
-  httpServer.listen(HTTP_PORT, () => {
-    console.error(`[Server] HTTP server running on http://localhost:${HTTP_PORT}`);
+  httpServer.listen(HTTP_PORT, '0.0.0.0', () => {
+    console.error(`[Server] HTTP server running on http://0.0.0.0:${HTTP_PORT}`);
   });
 }
 
@@ -307,7 +307,11 @@ function createHttpServer() {
  * Create and start WebSocket server for browser connections
  */
 function createWebSocketServer() {
-  wss = new WebSocketServer({ port: WS_PORT });
+  wss = new WebSocketServer({
+    host: '0.0.0.0',
+    port: WS_PORT,
+    perMessageDeflate: false  // Disable compression for faster connection handling
+  });
 
   wss.on('connection', (ws) => {
     console.error('[Server] Client connected');
@@ -334,7 +338,7 @@ function createWebSocketServer() {
     });
   });
 
-  console.error(`[Server] WebSocket server running on ws://localhost:${WS_PORT}`);
+  console.error(`[Server] WebSocket server running on ws://0.0.0.0:${WS_PORT}`);
 }
 
 /**
@@ -409,6 +413,15 @@ function handleBrowserMessage(message, ws) {
     // Update client info with URL from session start
     const clientInfo = clients.get(ws);
     if (clientInfo && data?.url) {
+      // Close any existing connections from the same URL (stale connections from page refresh)
+      for (const [existingWs, existingInfo] of clients.entries()) {
+        if (existingWs !== ws && existingInfo.url === data.url) {
+          console.error(`[Server] Closing stale connection for ${getNotebookId(data.url)}`);
+          try { existingWs.close(); } catch (e) {}
+          clients.delete(existingWs);
+        }
+      }
+
       clientInfo.url = data.url;
       clientInfo.sessionId = sessionId;
       console.error(`[Server] Notebook connected: ${getNotebookId(data.url)} (${data.url})`);

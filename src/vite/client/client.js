@@ -33,6 +33,8 @@ export class DebugClient {
     }
 
     this.connected = false;
+    this.connecting = false;
+    this.connectAttempts = 0;
     this.messageQueue = [];
     this.originalConsole = {};
     this.errorWatching = null;
@@ -43,6 +45,14 @@ export class DebugClient {
   }
 
   init() {
+    // Close WebSocket on page unload to prevent stale connections
+    window.addEventListener('beforeunload', () => {
+      if (this.ws) {
+        this.ws.onclose = null;  // Prevent reconnect attempt
+        this.ws.close();
+      }
+    });
+
     this.connect();
     this.originalConsole = patchConsole(this.send.bind(this));
     this.errorWatching = setupErrorWatching(this.send.bind(this));
@@ -91,13 +101,56 @@ export class DebugClient {
   }
 
   connect() {
-    const wsUrl = `ws://localhost:${this.config.ws}`;
+    // Connect through Vite's WebSocket proxy (same origin as the page)
+    // This avoids cross-port connection issues on mobile Safari
+    const wsUrl = `ws://${window.location.host}/__debug_ws`;
+
+    const MAX_CONNECT_ATTEMPTS = 5;
+
+    // Prevent multiple simultaneous connection attempts
+    if (this.connecting) {
+      return;
+    }
+
+    this.connectAttempts++;
+    if (this.connectAttempts > MAX_CONNECT_ATTEMPTS) {
+      console.log("[DebugClient] Max connection attempts reached, giving up");
+      return;
+    }
+
+    this.connecting = true;
+
+    // Close any existing WebSocket before creating a new one
+    if (this.ws) {
+      try {
+        this.ws.onclose = null;  // Remove handler to avoid triggering reconnect
+        this.ws.onerror = null;
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.close();
+      } catch (e) {}
+      this.ws = null;
+    }
 
     try {
+      console.log("[DebugClient] Connecting via Vite proxy:", wsUrl, `(attempt ${this.connectAttempts}/${MAX_CONNECT_ATTEMPTS})`);
       this.ws = new WebSocket(wsUrl);
 
+      // Set a connection timeout - if onopen doesn't fire within 3s, retry
+      const connectionTimeout = setTimeout(() => {
+        if (!this.connected && this.connecting) {
+          console.log("[DebugClient] Connection timeout, retrying...");
+          this.connecting = false;
+          try { this.ws.close(); } catch (e) {}
+          setTimeout(() => this.connect(), 500);
+        }
+      }, 3000);
+
       this.ws.onopen = () => {
+        clearTimeout(connectionTimeout);
+        this.connecting = false;
         this.connected = true;
+        this.connectAttempts = 0; // Reset on successful connection
         console.log("[DebugClient] Connected to MCP server at", wsUrl);
 
         // Show the event log overlay as soon as we connect
@@ -109,13 +162,20 @@ export class DebugClient {
         }
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (event) => {
+        clearTimeout(connectionTimeout);
+        const wasConnected = this.connected;
+        this.connecting = false;
         this.connected = false;
-        console.log("[DebugClient] Disconnected from MCP server, reconnecting in", RECONNECT_INTERVAL, "ms");
-        setTimeout(() => this.connect(), RECONNECT_INTERVAL);
+        // Only auto-reconnect if we were previously connected (not from a failed connection attempt)
+        if (wasConnected) {
+          console.log("[DebugClient] Disconnected from MCP server (code:", event.code, "reason:", event.reason || "none", "), reconnecting in", RECONNECT_INTERVAL, "ms");
+          setTimeout(() => this.connect(), RECONNECT_INTERVAL);
+        }
       };
 
       this.ws.onerror = (err) => {
+        clearTimeout(connectionTimeout);
         console.error("[DebugClient] WebSocket error:", err);
       };
 

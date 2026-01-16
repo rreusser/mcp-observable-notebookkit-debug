@@ -14,6 +14,7 @@
 
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { connect as netConnect } from "net";
 
 // File paths for client scripts
 const CLIENT_FILES = {
@@ -57,6 +58,7 @@ function readPortConfig(projectRoot) {
 export function debugNotebook() {
   let isDevMode = false;
   let projectRoot = process.cwd();
+  let serverHost = null;
 
   return {
     name: "debug-notebook",
@@ -65,6 +67,12 @@ export function debugNotebook() {
     configResolved(config) {
       isDevMode = config.command === "serve";
       projectRoot = config.root || process.cwd();
+      // Capture vite's host configuration
+      // If host is true or a string (not localhost/127.0.0.1), we'll use window.location.hostname
+      const host = config.server?.host;
+      if (host === true || (typeof host === 'string' && host !== 'localhost' && host !== '127.0.0.1')) {
+        serverHost = 'auto'; // Signal to client to use window.location.hostname
+      }
     },
 
     // Virtual module resolution for runtime exposure
@@ -81,8 +89,40 @@ export function debugNotebook() {
       }
     },
 
-    // Serve the virtual module via HTTP
+    // Serve the virtual module via HTTP and proxy WebSocket connections
     configureServer(server) {
+      // Proxy WebSocket connections to the MCP server
+      const portConfig = readPortConfig(projectRoot);
+      const wsPort = portConfig.ws || DEFAULT_WS_PORT;
+
+      server.httpServer?.on('upgrade', (req, socket, head) => {
+        // Only proxy requests to our debug path
+        if (req.url === '/__debug_ws') {
+          const targetSocket = netConnect(wsPort, 'localhost', () => {
+            // Forward the upgrade request
+            targetSocket.write(
+              `GET / HTTP/1.1\r\n` +
+              `Host: localhost:${wsPort}\r\n` +
+              `Upgrade: websocket\r\n` +
+              `Connection: Upgrade\r\n` +
+              `Sec-WebSocket-Key: ${req.headers['sec-websocket-key']}\r\n` +
+              `Sec-WebSocket-Version: ${req.headers['sec-websocket-version']}\r\n` +
+              `\r\n`
+            );
+            // Pipe data between client and target
+            socket.pipe(targetSocket);
+            targetSocket.pipe(socket);
+          });
+
+          targetSocket.on('error', (err) => {
+            console.error('[debug-notebook] WebSocket proxy error:', err.message);
+            socket.destroy();
+          });
+
+          socket.on('error', () => targetSocket.destroy());
+        }
+      });
+
       server.middlewares.use(async (req, res, next) => {
         if (req.url === "/@debug-notebook-runtime.js") {
           try {
@@ -112,6 +152,10 @@ export function debugNotebook() {
 
       // Read port config fresh each time (in case MCP server restarted)
       const portConfig = readPortConfig(projectRoot);
+      // Add host configuration if vite is running with --host
+      if (serverHost) {
+        portConfig.host = serverHost;
+      }
       const configScript = `window.__NOTEBOOKKIT_DEBUG_CONFIG__ = ${JSON.stringify(portConfig)};`;
 
       // Read client files fresh each time for easier development
