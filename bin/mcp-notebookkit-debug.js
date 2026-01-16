@@ -35,6 +35,10 @@ let WS_PORT = BASE_WS_PORT;
 // Debug directory for this project
 const DEBUG_DIR = join(process.cwd(), '.notebookkit-debug');
 const PORT_FILE = join(DEBUG_DIR, 'port');
+const RESPONSES_DIR = join(DEBUG_DIR, 'responses');
+
+// Large response handling
+const LARGE_RESPONSE_THRESHOLD = 3000; // chars
 
 /**
  * Ensure the debug directory exists
@@ -42,6 +46,65 @@ const PORT_FILE = join(DEBUG_DIR, 'port');
 async function ensureDebugDir() {
   if (!existsSync(DEBUG_DIR)) {
     await mkdir(DEBUG_DIR, { recursive: true });
+  }
+}
+
+/**
+ * Handle large responses by saving to file if over threshold
+ * @param {string} text - The response text
+ * @param {string} description - Description for the filename (e.g., 'svg-source', 'dep-graph')
+ * @returns {Promise<string>} - Original text if small, or summary with file path if large
+ */
+async function handleLargeResponse(text, description) {
+  if (text.length <= LARGE_RESPONSE_THRESHOLD) {
+    return text;
+  }
+
+  await mkdir(RESPONSES_DIR, { recursive: true });
+
+  const timestamp = Date.now();
+  const sanitizedDesc = description.replace(/[^a-z0-9-]/gi, '-').slice(0, 30);
+  const filename = `${sanitizedDesc}-${timestamp}.txt`;
+  const filepath = join(RESPONSES_DIR, filename);
+
+  await writeFile(filepath, text);
+
+  const preview = text.slice(0, 500);
+  return `[Large response saved to file]
+Path: ${filepath}
+Size: ${text.length} chars
+
+Preview:
+${preview}...
+
+[Use Read tool to view full content]`;
+}
+
+/**
+ * Clean up old response files (older than 1 hour)
+ */
+async function cleanupOldResponses() {
+  try {
+    if (!existsSync(RESPONSES_DIR)) return;
+
+    const { readdir, stat, unlink } = await import('fs/promises');
+    const files = await readdir(RESPONSES_DIR);
+    const oneHourAgo = Date.now() - (60 * 60 * 1000);
+
+    for (const file of files) {
+      const filepath = join(RESPONSES_DIR, file);
+      try {
+        const stats = await stat(filepath);
+        if (stats.mtimeMs < oneHourAgo) {
+          await unlink(filepath);
+          console.error(`[Server] Cleaned up old response file: ${file}`);
+        }
+      } catch (err) {
+        // Ignore individual file errors
+      }
+    }
+  } catch (err) {
+    console.error('[Server] Error cleaning up responses:', err.message);
   }
 }
 
@@ -1500,10 +1563,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      const valueOutput = await handleLargeResponse(formatValueResponse(response), `value-${valueName}`);
       return {
         content: [{
           type: 'text',
-          text: formatValueResponse(response)
+          text: valueOutput
         }]
       };
     }
@@ -1540,10 +1604,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         output.push('');
       }
 
+      const valuesOutput = await handleLargeResponse(output.join('\n'), 'values-bulk');
       return {
         content: [{
           type: 'text',
-          text: output.join('\n')
+          text: valuesOutput
         }]
       };
     }
@@ -1715,19 +1780,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         content.push({ type: 'text', text: textOutput.join('\n') });
         content.push({ type: 'image', data: response.imageData, mimeType: 'image/png' });
       } else {
-        // Handle text content
+        // Handle text content (with large response handling)
         if (response.textContent !== undefined) {
-          textOutput.push(`\nText content:\n${response.textContent}`);
+          const textContent = await handleLargeResponse(response.textContent, `text-${selector}`);
+          textOutput.push(`\nText content:\n${textContent}`);
         }
 
-        // Handle HTML content
-        if (response.innerHTML !== undefined && mode === 'html') {
-          textOutput.push(`\nHTML:\n${response.innerHTML}`);
+        // Handle innerHTML (with large response handling)
+        if (response.innerHTML !== undefined) {
+          const innerHTML = await handleLargeResponse(response.innerHTML, `html-${selector}`);
+          textOutput.push(`\nHTML:\n${innerHTML}`);
         }
 
-        // Handle SVG source
+        // Handle SVG source (with large response handling)
         if (response.svgSource !== undefined) {
-          textOutput.push(`\nSVG source:\n${response.svgSource}`);
+          const svgSource = await handleLargeResponse(response.svgSource, `svg-${selector}`);
+          textOutput.push(`\nSVG source:\n${svgSource}`);
         }
 
         content.push({ type: 'text', text: textOutput.join('\n') });
@@ -1799,18 +1867,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Show edges in a compact format
       if (edges.length > 0) {
         output.push(`## Edges (from → to)`);
-        for (const edge of edges.slice(0, 50)) {
+        for (const edge of edges) {
           output.push(`  ${edge.from} → ${edge.to}`);
-        }
-        if (edges.length > 50) {
-          output.push(`  ... and ${edges.length - 50} more`);
         }
       }
 
+      const graphOutput = await handleLargeResponse(output.join('\n'), 'dep-graph');
       return {
         content: [{
           type: 'text',
-          text: output.join('\n')
+          text: graphOutput
         }]
       };
     }
@@ -1867,10 +1933,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      const evalOutput = await handleLargeResponse(`Result:\n${formatValue(response.result)}`, 'eval-result');
       return {
         content: [{
           type: 'text',
-          text: `Result:\n${formatValue(response.result)}`
+          text: evalOutput
         }]
       };
     }
@@ -2074,10 +2141,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         output.push('(Value is still computing)');
       }
 
+      const defineOutput = await handleLargeResponse(output.join('\n'), `define-${varName}`);
       return {
         content: [{
           type: 'text',
-          text: output.join('\n')
+          text: defineOutput
         }]
       };
     }
@@ -2153,6 +2221,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start servers
 async function main() {
+  // Clean up old response files from previous sessions
+  await cleanupOldResponses();
+
   // Find available ports
   console.error('[Server] Finding available ports...');
   const ports = await findAvailablePorts();

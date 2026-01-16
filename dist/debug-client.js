@@ -2422,6 +2422,7 @@
   // src/vite/client/ui/event-log.js
   var TOAST_DURATION = 2500;
   var MAX_EVENTS = 50;
+  var EXPANDED_STORAGE_KEY = "__mcp_event_log_expanded";
   var MOUSE_EVENTS = ["MouseClick", "MouseHover", "MouseDrag", "MouseWheel"];
   var container = null;
   var toastContainer = null;
@@ -3046,6 +3047,10 @@
     toggleButton.classList.toggle("expanded", expanded);
     historyPanel.classList.toggle("visible", expanded);
     toastContainer.style.display = expanded ? "none" : "flex";
+    try {
+      localStorage.setItem(EXPANDED_STORAGE_KEY, expanded ? "1" : "0");
+    } catch (e) {
+    }
     if (expanded) {
       renderHistory();
     } else {
@@ -3060,6 +3065,10 @@
   }
   function init2() {
     if (container) return;
+    try {
+      expanded = localStorage.getItem(EXPANDED_STORAGE_KEY) === "1";
+    } catch (e) {
+    }
     const styleEl2 = document.createElement("style");
     styleEl2.textContent = styles2;
     document.head.appendChild(styleEl2);
@@ -3108,6 +3117,12 @@
       }
     });
     document.body.appendChild(container);
+    if (expanded) {
+      toggleButton.classList.add("expanded");
+      historyPanel.classList.add("visible");
+      toastContainer.style.display = "none";
+      renderHistory();
+    }
   }
   function logEvent(eventName, args = {}) {
     init2();

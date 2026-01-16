@@ -8,6 +8,7 @@ import { showClick, showHover, showDrag, showWheel } from "./mouse-visualizer.js
 
 const TOAST_DURATION = 2500;
 const MAX_EVENTS = 50;
+const EXPANDED_STORAGE_KEY = '__mcp_event_log_expanded';
 
 // Mouse event types that can be replayed
 const MOUSE_EVENTS = ['MouseClick', 'MouseHover', 'MouseDrag', 'MouseWheel'];
@@ -698,6 +699,13 @@ function toggleExpanded() {
   historyPanel.classList.toggle('visible', expanded);
   toastContainer.style.display = expanded ? 'none' : 'flex';
 
+  // Persist to localStorage
+  try {
+    localStorage.setItem(EXPANDED_STORAGE_KEY, expanded ? '1' : '0');
+  } catch (e) {
+    // Ignore storage errors (e.g., private browsing)
+  }
+
   if (expanded) {
     renderHistory();
   } else {
@@ -714,6 +722,13 @@ function clearHistory() {
 
 function init() {
   if (container) return;
+
+  // Load expanded state from localStorage
+  try {
+    expanded = localStorage.getItem(EXPANDED_STORAGE_KEY) === '1';
+  } catch (e) {
+    // Ignore storage errors
+  }
 
   // Inject styles
   const styleEl = document.createElement('style');
@@ -783,6 +798,14 @@ function init() {
   });
 
   document.body.appendChild(container);
+
+  // Apply initial expanded state from localStorage
+  if (expanded) {
+    toggleButton.classList.add('expanded');
+    historyPanel.classList.add('visible');
+    toastContainer.style.display = 'none';
+    renderHistory();
+  }
 }
 
 export function logEvent(eventName, args = {}) {
