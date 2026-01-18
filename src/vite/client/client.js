@@ -103,7 +103,8 @@ export class DebugClient {
   connect() {
     // Connect through Vite's WebSocket proxy (same origin as the page)
     // This avoids cross-port connection issues on mobile Safari
-    const wsUrl = `ws://${window.location.host}/__debug_ws`;
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${wsProtocol}//${window.location.host}/__debug_ws`;
 
     const MAX_CONNECT_ATTEMPTS = 5;
 

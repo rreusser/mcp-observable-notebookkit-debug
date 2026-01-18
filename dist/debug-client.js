@@ -375,26 +375,6 @@
   async function handleGetErrorsRequest(client, message) {
     const verbose = message.verbose || false;
     const errors = [];
-    const errorSelectors = [
-      ".observablehq--error",
-      ".notebook-error",
-      "[data-error]",
-      ".error"
-    ];
-    for (const selector of errorSelectors) {
-      document.querySelectorAll(selector).forEach((el) => {
-        const cellElement = el.closest('[id^="cell-"]') || el.closest("script") || el.parentElement;
-        const cellId = cellElement?.id || "unknown";
-        const errorText = el.textContent?.trim() || el.getAttribute("data-error") || "Unknown error";
-        if (!errors.some((e) => e.cell === cellId && e.error === errorText)) {
-          errors.push({
-            cell: cellId,
-            error: errorText,
-            source: "dom"
-          });
-        }
-      });
-    }
     const runtime = getRuntimeModule();
     if (runtime && runtime._scope) {
       const names = Array.from(runtime._scope.keys()).filter(
@@ -403,18 +383,14 @@
       for (const name of names) {
         const result = await getValueState(runtime, name, 100);
         if (result.state === "rejected") {
-          if (!errors.some((e) => e.cell === name)) {
-            const errorEntry = {
-              cell: name,
-              name,
-              error: result.error,
-              source: "runtime"
-            };
-            if (verbose && result.stack) {
-              errorEntry.stack = result.stack;
-            }
-            errors.push(errorEntry);
+          const errorEntry = {
+            name,
+            error: result.error
+          };
+          if (verbose && result.stack) {
+            errorEntry.stack = result.stack;
           }
+          errors.push(errorEntry);
         }
       }
     }
@@ -1727,6 +1703,49 @@
   0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
 }
+
+/* ============================================
+   ELEMENT HIGHLIGHT - Cyan theme
+   ============================================ */
+.mcp-element-highlight {
+  box-sizing: border-box;
+  border: 2px solid #22d3ee;
+  background: rgba(34, 211, 238, 0.1);
+  border-radius: 4px;
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.6), inset 0 0 20px rgba(34, 211, 238, 0.1);
+  animation: mcp-highlight-in 0.2s ease-out forwards;
+}
+
+.mcp-element-highlight-label {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 20, 0.95);
+  border: 1.5px solid #22d3ee;
+  border-radius: 3px;
+  padding: 2px 6px;
+  color: #22d3ee;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+}
+
+@keyframes mcp-highlight-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.mcp-element-highlight.fading {
+  animation: mcp-highlight-out 0.3s ease-in forwards;
+}
+
+@keyframes mcp-highlight-out {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
 `;
   function init() {
     if (initialized) return;
@@ -1989,8 +2008,38 @@
       setTimeout(() => el.remove(), 400);
     }, 1500);
   }
+  var currentHighlight = null;
+  function showElementHighlight(selector) {
+    hideElementHighlight();
+    if (!selector) return;
+    const el = document.querySelector(selector);
+    if (!el) return;
+    init();
+    const rect = el.getBoundingClientRect();
+    const highlight = document.createElement("div");
+    highlight.className = "mcp-mouse-viz mcp-element-highlight";
+    highlight.style.position = "absolute";
+    highlight.style.left = `${rect.left + window.scrollX}px`;
+    highlight.style.top = `${rect.top + window.scrollY}px`;
+    highlight.style.width = `${rect.width}px`;
+    highlight.style.height = `${rect.height}px`;
+    const label = document.createElement("div");
+    label.className = "mcp-element-highlight-label";
+    label.textContent = "ELEMENT";
+    highlight.appendChild(label);
+    document.body.appendChild(highlight);
+    currentHighlight = highlight;
+  }
+  function hideElementHighlight() {
+    if (currentHighlight) {
+      currentHighlight.classList.add("fading");
+      const el = currentHighlight;
+      setTimeout(() => el.remove(), 300);
+      currentHighlight = null;
+    }
+  }
   if (typeof window !== "undefined") {
-    window.__mcpMouseViz = { showClick, showHover, showDrag, showWheel };
+    window.__mcpMouseViz = { showClick, showHover, showDrag, showWheel, showElementHighlight, hideElementHighlight };
   }
 
   // src/vite/client/handlers/mouse.js
@@ -2424,6 +2473,7 @@
   var MAX_EVENTS = 50;
   var EXPANDED_STORAGE_KEY = "__mcp_event_log_expanded";
   var MOUSE_EVENTS = ["MouseClick", "MouseHover", "MouseDrag", "MouseWheel"];
+  var ELEMENT_EVENTS = ["GetElementContent"];
   var container = null;
   var toastContainer = null;
   var historyPanel = null;
@@ -2640,6 +2690,19 @@
   text-overflow: ellipsis;
 }
 
+/* Event state colors */
+.mcp-event-item.pending .mcp-event-name {
+  color: #fbbf24;
+}
+
+.mcp-event-item.fulfilled .mcp-event-name {
+  color: #6ee7b7;
+}
+
+.mcp-event-item.rejected .mcp-event-name {
+  color: #f87171;
+}
+
 .mcp-event-label {
   color: rgba(255, 255, 255, 0.4);
   font-size: 0.9em;
@@ -2671,6 +2734,7 @@
   border-radius: 50%;
   background: currentColor;
   margin-right: 6px;
+  margin-left: 2px;
   opacity: 0.5;
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
@@ -2809,7 +2873,14 @@
 .mcp-detail-section img {
   max-width: 100%;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.3);
+  background-color: #1a1a1a;
+  background-image:
+    linear-gradient(45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
+    linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
 }
 
 .mcp-detail-meta {
@@ -2889,25 +2960,31 @@
   }
   function replayMouseEvent(event) {
     const args = event.args;
+    const resp = event.response;
     switch (event.name) {
       case "MouseClick": {
-        const { clientX, clientY } = getAbsoluteCoords(args.selector, args.x, args.y);
+        const clientX = resp?.clientX ?? getAbsoluteCoords(args.selector, args.x, args.y).clientX;
+        const clientY = resp?.clientY ?? getAbsoluteCoords(args.selector, args.x, args.y).clientY;
         showClick(clientX, clientY);
         break;
       }
       case "MouseHover": {
-        const { clientX, clientY } = getAbsoluteCoords(args.selector, args.x, args.y);
+        const clientX = resp?.clientX ?? getAbsoluteCoords(args.selector, args.x, args.y).clientX;
+        const clientY = resp?.clientY ?? getAbsoluteCoords(args.selector, args.x, args.y).clientY;
         showHover(clientX, clientY);
         break;
       }
       case "MouseDrag": {
-        const start = getAbsoluteCoords(args.selector, args.startX, args.startY);
-        const end = getAbsoluteCoords(args.selector, args.endX, args.endY);
-        showDrag(start.clientX, start.clientY, end.clientX, end.clientY);
+        const startX = resp?.startClientX ?? getAbsoluteCoords(args.selector, args.startX, args.startY).clientX;
+        const startY = resp?.startClientY ?? getAbsoluteCoords(args.selector, args.startX, args.startY).clientY;
+        const endX = resp?.endClientX ?? getAbsoluteCoords(args.selector, args.endX, args.endY).clientX;
+        const endY = resp?.endClientY ?? getAbsoluteCoords(args.selector, args.endX, args.endY).clientY;
+        showDrag(startX, startY, endX, endY);
         break;
       }
       case "MouseWheel": {
-        const { clientX, clientY } = getAbsoluteCoords(args.selector, args.x, args.y);
+        const clientX = resp?.clientX ?? getAbsoluteCoords(args.selector, args.x, args.y).clientX;
+        const clientY = resp?.clientY ?? getAbsoluteCoords(args.selector, args.x, args.y).clientY;
         showWheel(clientX, clientY, args.deltaY || 0);
         break;
       }
@@ -3000,12 +3077,17 @@
       return;
     }
     list.innerHTML = events.map((event, index) => {
-      const isReplayable = MOUSE_EVENTS.includes(event.name);
+      const isMouseReplayable = MOUSE_EVENTS.includes(event.name);
+      const isElementReplayable = ELEMENT_EVENTS.includes(event.name);
+      const isReplayable = isMouseReplayable || isElementReplayable;
       const isSelected = selectedEventIndex === index;
       const labelHtml = event.label ? `<span class="mcp-event-label">(${event.label})</span>` : "";
-      const hasResponse = event.response ? " has-response" : "";
+      let stateClass = "pending";
+      if (event.response) {
+        stateClass = event.response.success ? "fulfilled" : "rejected";
+      }
       return `
-      <div class="mcp-event-item${isReplayable ? " replayable" : ""}${isSelected ? " selected" : ""}${hasResponse}" data-index="${index}">
+      <div class="mcp-event-item${isReplayable ? " replayable" : ""}${isSelected ? " selected" : ""} ${stateClass}" data-index="${index}">
         <div class="mcp-event-summary">
           <span class="mcp-event-name">${event.name}${labelHtml}</span>
           <span class="mcp-event-time">${formatTime(event.timestamp)}</span>
@@ -3032,6 +3114,17 @@
       if (MOUSE_EVENTS.includes(event.name)) {
         item.addEventListener("mouseenter", () => {
           replayMouseEvent(event);
+        });
+      }
+      if (ELEMENT_EVENTS.includes(event.name)) {
+        item.addEventListener("mouseenter", () => {
+          const selector = event.args?.selector;
+          if (selector) {
+            showElementHighlight(selector);
+          }
+        });
+        item.addEventListener("mouseleave", () => {
+          hideElementHighlight();
         });
       }
     });
@@ -3242,7 +3335,8 @@
       }, 100);
     }
     connect() {
-      const wsUrl = `ws://${window.location.host}/__debug_ws`;
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${wsProtocol}//${window.location.host}/__debug_ws`;
       const MAX_CONNECT_ATTEMPTS = 5;
       if (this.connecting) {
         return;

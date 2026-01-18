@@ -811,6 +811,73 @@ function formatSessionOutput(session, filter, maxChars = 2000) {
 }
 
 /**
+ * Format console messages for GetConsoleMessages tool
+ * @param {Object} session - The session object
+ * @param {string} channel - Optional channel filter ('log', 'info', 'warn', 'error')
+ * @param {string} filter - Optional substring filter
+ * @param {number} maxChars - Maximum output length (0 for unlimited)
+ */
+function formatConsoleMessages(session, channel, filter, maxChars = 2000) {
+  if (!session) {
+    return 'No session data available';
+  }
+
+  let logs = session.logs || [];
+
+  // Filter by channel if specified
+  if (channel) {
+    logs = logs.filter(log => log.level === channel);
+  }
+
+  // Filter by substring if specified
+  if (filter) {
+    logs = logs.filter(log => {
+      const logText = log.args?.map(arg => {
+        if (typeof arg === 'object') {
+          return JSON.stringify(arg);
+        }
+        return String(arg);
+      }).join(' ') || '';
+      return logText.includes(filter);
+    });
+  }
+
+  const output = [];
+  output.push(`Session: ${session.id}`);
+
+  const channelInfo = channel ? ` (channel: ${channel})` : ' (all channels)';
+  const filterInfo = filter ? `, filter: "${filter}"` : '';
+  output.push(`Messages: ${logs.length}${channelInfo}${filterInfo}`);
+  output.push('');
+
+  if (logs.length === 0) {
+    output.push('No messages found.');
+  } else {
+    logs.forEach(log => {
+      const time = log.timestamp ? new Date(log.timestamp).toISOString().split('T')[1].slice(0, -1) : '??:??:??';
+      const level = log.level.toUpperCase().padEnd(5);
+      const args = log.args?.map(arg => {
+        if (typeof arg === 'object') {
+          return JSON.stringify(arg);
+        }
+        return String(arg);
+      }).join(' ') || '';
+
+      output.push(`[${time}] ${level} ${args}`);
+    });
+  }
+
+  let result = output.join('\n');
+
+  // Apply truncation if maxChars is set (non-zero)
+  if (maxChars > 0 && result.length > maxChars) {
+    result = result.slice(0, maxChars) + '\n\n[OUTPUT TRUNCATED - ' + result.length + ' chars total, showing first ' + maxChars + '. Use max_chars parameter to adjust limit, channel to filter by level, or filter to narrow results.]';
+  }
+
+  return result;
+}
+
+/**
  * Format a value response with state information
  */
 function formatValueResponse(response) {
@@ -1050,8 +1117,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'GetLogs',
-        description: 'Get logs from the current or most recent session without triggering a refresh',
+        name: 'GetConsoleMessages',
+        description: 'Get console messages (log, info, warn, error) from the current or most recent session. Use this to debug console output without triggering a refresh.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1059,9 +1126,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'Specific session ID (optional, uses current session if not provided)'
             },
+            channel: {
+              type: 'string',
+              enum: ['log', 'info', 'warn', 'error'],
+              description: 'Filter to a specific console channel. If omitted, returns all channels.'
+            },
             filter: {
               type: 'string',
-              description: 'Filter logs by substring match'
+              description: 'Filter messages by substring match'
             },
             max_chars: {
               type: 'number',
@@ -1073,7 +1145,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'GetErrors',
-        description: 'Get all errors from the notebook. Includes both DOM-reported errors and values in rejected state.',
+        description: 'Get runtime errors from the Observable runtime. Returns values that are in a rejected state (failed to compute). For console.error messages, use GetConsoleMessages with channel="error".',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1488,7 +1560,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const result = await waitForCompletion(sessionId, timeout);
 
       const session = result.session;
-      const errorCount = session?.errors?.length || 0;
+      const uncaughtCount = session?.errors?.length || 0;
       const logCount = session?.logs?.length || 0;
 
       const statusText = result.completed
@@ -1497,16 +1569,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const output = [statusText];
 
-      if (errorCount > 0) {
-        output.push(`Errors: ${errorCount}`);
+      if (uncaughtCount > 0) {
+        output.push(`Uncaught exceptions: ${uncaughtCount}`);
         session.errors.forEach(error => {
           output.push(`  - ${error.message}${error.cellId ? ` (cell: ${error.cellId})` : ''}`);
         });
       } else {
-        output.push('No errors');
+        output.push('No uncaught exceptions');
       }
 
-      output.push(`Logs: ${logCount} (use GetLogs to view)`);
+      output.push(`Console messages: ${logCount} (use GetConsoleMessages to view)`);
+      output.push(`(Use GetErrors for runtime rejected values)`);
 
       return {
         content: [{
@@ -1653,8 +1726,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'GetLogs') {
-      const { session_id, filter, max_chars = 2000 } = args || {};
+    if (name === 'GetConsoleMessages') {
+      const { session_id, channel, filter, max_chars = 2000 } = args || {};
 
       const sessionId = session_id || currentSessionId;
 
@@ -1672,7 +1745,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: 'text',
-          text: formatSessionOutput(session, filter, max_chars)
+          text: formatConsoleMessages(session, channel, filter, max_chars)
         }]
       };
     }
@@ -1699,8 +1772,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       const errorList = response.errors.map(e => {
-        const name = e.name || e.cell;
-        let msg = `Value: ${name}\nError: ${e.error}`;
+        let msg = `Value: ${e.name}\nError: ${e.error}`;
         if (verbose && e.stack) {
           const stackLines = e.stack.split('\n').slice(0, 6).join('\n');
           msg += `\nStack:\n${stackLines}`;

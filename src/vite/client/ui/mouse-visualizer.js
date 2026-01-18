@@ -416,6 +416,49 @@ const styles = `
   0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   100% { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
 }
+
+/* ============================================
+   ELEMENT HIGHLIGHT - Cyan theme
+   ============================================ */
+.mcp-element-highlight {
+  box-sizing: border-box;
+  border: 2px solid #22d3ee;
+  background: rgba(34, 211, 238, 0.1);
+  border-radius: 4px;
+  box-shadow: 0 0 12px rgba(34, 211, 238, 0.6), inset 0 0 20px rgba(34, 211, 238, 0.1);
+  animation: mcp-highlight-in 0.2s ease-out forwards;
+}
+
+.mcp-element-highlight-label {
+  position: absolute;
+  top: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20, 20, 20, 0.95);
+  border: 1.5px solid #22d3ee;
+  border-radius: 3px;
+  padding: 2px 6px;
+  color: #22d3ee;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.6);
+}
+
+@keyframes mcp-highlight-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.mcp-element-highlight.fading {
+  animation: mcp-highlight-out 0.3s ease-in forwards;
+}
+
+@keyframes mcp-highlight-out {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
 `;
 
 function init() {
@@ -791,7 +834,53 @@ export function showWheel(clientX, clientY, deltaY) {
   }, 1500);
 }
 
+/**
+ * Show a highlight around an element by selector
+ * Returns a function to dismiss it (for use on mouseleave)
+ */
+let currentHighlight = null;
+
+export function showElementHighlight(selector) {
+  // Remove any existing highlight
+  hideElementHighlight();
+
+  if (!selector) return;
+
+  const el = document.querySelector(selector);
+  if (!el) return;
+
+  init();
+
+  const rect = el.getBoundingClientRect();
+
+  const highlight = document.createElement('div');
+  highlight.className = 'mcp-mouse-viz mcp-element-highlight';
+  highlight.style.position = 'absolute';
+  highlight.style.left = `${rect.left + window.scrollX}px`;
+  highlight.style.top = `${rect.top + window.scrollY}px`;
+  highlight.style.width = `${rect.width}px`;
+  highlight.style.height = `${rect.height}px`;
+
+  // Add label
+  const label = document.createElement('div');
+  label.className = 'mcp-element-highlight-label';
+  label.textContent = 'ELEMENT';
+  highlight.appendChild(label);
+
+  document.body.appendChild(highlight);
+  currentHighlight = highlight;
+}
+
+export function hideElementHighlight() {
+  if (currentHighlight) {
+    currentHighlight.classList.add('fading');
+    const el = currentHighlight;
+    setTimeout(() => el.remove(), 300);
+    currentHighlight = null;
+  }
+}
+
 // Expose for debugging
 if (typeof window !== 'undefined') {
-  window.__mcpMouseViz = { showClick, showHover, showDrag, showWheel };
+  window.__mcpMouseViz = { showClick, showHover, showDrag, showWheel, showElementHighlight, hideElementHighlight };
 }

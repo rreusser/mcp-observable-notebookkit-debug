@@ -5,40 +5,12 @@
 import { getRuntimeModule, getValueState } from "../utils/runtime.js";
 
 /**
- * Handle GetErrors request - get all errors from DOM and runtime
+ * Handle GetErrors request - get runtime errors (values in rejected state)
+ * For console.error messages, use GetConsoleMessages with channel="error"
  */
 export async function handleGetErrorsRequest(client, message) {
   const verbose = message.verbose || false;
   const errors = [];
-
-  const errorSelectors = [
-    ".observablehq--error",
-    ".notebook-error",
-    "[data-error]",
-    ".error",
-  ];
-
-  for (const selector of errorSelectors) {
-    document.querySelectorAll(selector).forEach((el) => {
-      const cellElement =
-        el.closest('[id^="cell-"]') ||
-        el.closest("script") ||
-        el.parentElement;
-      const cellId = cellElement?.id || "unknown";
-      const errorText =
-        el.textContent?.trim() ||
-        el.getAttribute("data-error") ||
-        "Unknown error";
-
-      if (!errors.some((e) => e.cell === cellId && e.error === errorText)) {
-        errors.push({
-          cell: cellId,
-          error: errorText,
-          source: "dom",
-        });
-      }
-    });
-  }
 
   const runtime = getRuntimeModule();
   if (runtime && runtime._scope) {
@@ -49,19 +21,15 @@ export async function handleGetErrorsRequest(client, message) {
     for (const name of names) {
       const result = await getValueState(runtime, name, 100);
       if (result.state === "rejected") {
-        if (!errors.some((e) => e.cell === name)) {
-          const errorEntry = {
-            cell: name,
-            name: name,
-            error: result.error,
-            source: "runtime",
-          };
-          // Only include stack trace when verbose is true
-          if (verbose && result.stack) {
-            errorEntry.stack = result.stack;
-          }
-          errors.push(errorEntry);
+        const errorEntry = {
+          name: name,
+          error: result.error,
+        };
+        // Only include stack trace when verbose is true
+        if (verbose && result.stack) {
+          errorEntry.stack = result.stack;
         }
+        errors.push(errorEntry);
       }
     }
   }

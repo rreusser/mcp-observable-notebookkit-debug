@@ -4,7 +4,7 @@
  * Clicking an event opens a detail panel to the left
  */
 
-import { showClick, showHover, showDrag, showWheel } from "./mouse-visualizer.js";
+import { showClick, showHover, showDrag, showWheel, showElementHighlight, hideElementHighlight } from "./mouse-visualizer.js";
 
 const TOAST_DURATION = 2500;
 const MAX_EVENTS = 50;
@@ -12,6 +12,9 @@ const EXPANDED_STORAGE_KEY = '__mcp_event_log_expanded';
 
 // Mouse event types that can be replayed
 const MOUSE_EVENTS = ['MouseClick', 'MouseHover', 'MouseDrag', 'MouseWheel'];
+
+// Element events that show bounding box highlights
+const ELEMENT_EVENTS = ['GetElementContent'];
 
 let container = null;
 let toastContainer = null;
@@ -230,6 +233,19 @@ const styles = `
   text-overflow: ellipsis;
 }
 
+/* Event state colors */
+.mcp-event-item.pending .mcp-event-name {
+  color: #fbbf24;
+}
+
+.mcp-event-item.fulfilled .mcp-event-name {
+  color: #6ee7b7;
+}
+
+.mcp-event-item.rejected .mcp-event-name {
+  color: #f87171;
+}
+
 .mcp-event-label {
   color: rgba(255, 255, 255, 0.4);
   font-size: 0.9em;
@@ -261,6 +277,7 @@ const styles = `
   border-radius: 50%;
   background: currentColor;
   margin-right: 6px;
+  margin-left: 2px;
   opacity: 0.5;
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
@@ -399,7 +416,14 @@ const styles = `
 .mcp-detail-section img {
   max-width: 100%;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.3);
+  background-color: #1a1a1a;
+  background-image:
+    linear-gradient(45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(-45deg, #2a2a2a 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2a2a2a 75%),
+    linear-gradient(-45deg, transparent 75%, #2a2a2a 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
 }
 
 .mcp-detail-meta {
@@ -489,29 +513,41 @@ function getAbsoluteCoords(selector, x = 0, y = 0) {
 
 /**
  * Replay a mouse event visualization
+ * Uses stored response coordinates when available to show where the event
+ * actually happened, even if the element has since moved.
  */
 function replayMouseEvent(event) {
   const args = event.args;
+  const resp = event.response;
 
   switch (event.name) {
     case 'MouseClick': {
-      const { clientX, clientY } = getAbsoluteCoords(args.selector, args.x, args.y);
+      // Prefer response coordinates (where event actually happened)
+      const clientX = resp?.clientX ?? getAbsoluteCoords(args.selector, args.x, args.y).clientX;
+      const clientY = resp?.clientY ?? getAbsoluteCoords(args.selector, args.x, args.y).clientY;
       showClick(clientX, clientY);
       break;
     }
     case 'MouseHover': {
-      const { clientX, clientY } = getAbsoluteCoords(args.selector, args.x, args.y);
+      // Prefer response coordinates (where event actually happened)
+      const clientX = resp?.clientX ?? getAbsoluteCoords(args.selector, args.x, args.y).clientX;
+      const clientY = resp?.clientY ?? getAbsoluteCoords(args.selector, args.x, args.y).clientY;
       showHover(clientX, clientY);
       break;
     }
     case 'MouseDrag': {
-      const start = getAbsoluteCoords(args.selector, args.startX, args.startY);
-      const end = getAbsoluteCoords(args.selector, args.endX, args.endY);
-      showDrag(start.clientX, start.clientY, end.clientX, end.clientY);
+      // Prefer response coordinates (where drag actually happened)
+      const startX = resp?.startClientX ?? getAbsoluteCoords(args.selector, args.startX, args.startY).clientX;
+      const startY = resp?.startClientY ?? getAbsoluteCoords(args.selector, args.startX, args.startY).clientY;
+      const endX = resp?.endClientX ?? getAbsoluteCoords(args.selector, args.endX, args.endY).clientX;
+      const endY = resp?.endClientY ?? getAbsoluteCoords(args.selector, args.endX, args.endY).clientY;
+      showDrag(startX, startY, endX, endY);
       break;
     }
     case 'MouseWheel': {
-      const { clientX, clientY } = getAbsoluteCoords(args.selector, args.x, args.y);
+      // Prefer response coordinates (where event actually happened)
+      const clientX = resp?.clientX ?? getAbsoluteCoords(args.selector, args.x, args.y).clientX;
+      const clientY = resp?.clientY ?? getAbsoluteCoords(args.selector, args.x, args.y).clientY;
       showWheel(clientX, clientY, args.deltaY || 0);
       break;
     }
@@ -639,12 +675,20 @@ function renderHistory() {
   }
 
   list.innerHTML = events.map((event, index) => {
-    const isReplayable = MOUSE_EVENTS.includes(event.name);
+    const isMouseReplayable = MOUSE_EVENTS.includes(event.name);
+    const isElementReplayable = ELEMENT_EVENTS.includes(event.name);
+    const isReplayable = isMouseReplayable || isElementReplayable;
     const isSelected = selectedEventIndex === index;
     const labelHtml = event.label ? `<span class="mcp-event-label">(${event.label})</span>` : '';
-    const hasResponse = event.response ? ' has-response' : '';
+
+    // Determine state: pending, fulfilled, or rejected
+    let stateClass = 'pending';
+    if (event.response) {
+      stateClass = event.response.success ? 'fulfilled' : 'rejected';
+    }
+
     return `
-      <div class="mcp-event-item${isReplayable ? ' replayable' : ''}${isSelected ? ' selected' : ''}${hasResponse}" data-index="${index}">
+      <div class="mcp-event-item${isReplayable ? ' replayable' : ''}${isSelected ? ' selected' : ''} ${stateClass}" data-index="${index}">
         <div class="mcp-event-summary">
           <span class="mcp-event-name">${event.name}${labelHtml}</span>
           <span class="mcp-event-time">${formatTime(event.timestamp)}</span>
@@ -680,6 +724,19 @@ function renderHistory() {
     if (MOUSE_EVENTS.includes(event.name)) {
       item.addEventListener('mouseenter', () => {
         replayMouseEvent(event);
+      });
+    }
+
+    // Hover to highlight element for element content events
+    if (ELEMENT_EVENTS.includes(event.name)) {
+      item.addEventListener('mouseenter', () => {
+        const selector = event.args?.selector;
+        if (selector) {
+          showElementHighlight(selector);
+        }
+      });
+      item.addEventListener('mouseleave', () => {
+        hideElementHighlight();
       });
     }
   });
