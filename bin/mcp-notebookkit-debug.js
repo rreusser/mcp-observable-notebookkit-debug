@@ -32,10 +32,16 @@ const COMPLETION_TIMEOUT = 30000;
 let HTTP_PORT = BASE_HTTP_PORT;
 let WS_PORT = BASE_WS_PORT;
 
+// Unique instance ID for this server
+const INSTANCE_ID = `mcp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
 // Debug directory for this project
 const DEBUG_DIR = join(process.cwd(), '.notebookkit-debug');
-const PORT_FILE = join(DEBUG_DIR, 'port');
+const REGISTRY_FILE = join(DEBUG_DIR, 'registry.json');
 const RESPONSES_DIR = join(DEBUG_DIR, 'responses');
+
+// Track notebooks this instance is handling
+const claimedNotebooks = new Set();
 
 // Large response handling
 const LARGE_RESPONSE_THRESHOLD = 3000; // chars
@@ -46,6 +52,196 @@ const LARGE_RESPONSE_THRESHOLD = 3000; // chars
 async function ensureDebugDir() {
   if (!existsSync(DEBUG_DIR)) {
     await mkdir(DEBUG_DIR, { recursive: true });
+  }
+}
+
+/**
+ * Check if a process is still running
+ */
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read the instance registry, pruning dead instances
+ */
+async function readRegistry() {
+  await ensureDebugDir();
+
+  let registry = { instances: {} };
+
+  try {
+    if (existsSync(REGISTRY_FILE)) {
+      const content = await import('fs/promises').then(fs => fs.readFile(REGISTRY_FILE, 'utf-8'));
+      // Handle empty file gracefully
+      if (content.trim()) {
+        registry = JSON.parse(content);
+      }
+    }
+  } catch (err) {
+    console.error('[Server] Could not read registry:', err.message);
+    registry = { instances: {} };
+  }
+
+  // Ensure instances object exists
+  if (!registry.instances) {
+    registry.instances = {};
+  }
+
+  // Prune dead instances
+  const deadInstances = [];
+  for (const [id, info] of Object.entries(registry.instances)) {
+    if (!isProcessAlive(info.pid)) {
+      deadInstances.push(id);
+    }
+  }
+
+  if (deadInstances.length > 0) {
+    for (const id of deadInstances) {
+      delete registry.instances[id];
+    }
+    console.error(`[Server] Pruned ${deadInstances.length} dead instance(s) from registry`);
+  }
+
+  // Clear owner if owner is dead
+  if (registry.owner && !registry.instances[registry.owner]) {
+    console.error(`[Server] Owner ${registry.owner} is dead, clearing ownership`);
+    registry.owner = null;
+  }
+
+  return registry;
+}
+
+/**
+ * Write the instance registry
+ */
+async function writeRegistry(registry) {
+  await ensureDebugDir();
+  await writeFile(REGISTRY_FILE, JSON.stringify(registry, null, 2));
+}
+
+/**
+ * Register this instance in the registry
+ */
+async function registerInstance() {
+  const registry = await readRegistry();
+
+  registry.instances[INSTANCE_ID] = {
+    pid: process.pid,
+    ws: WS_PORT,
+    http: HTTP_PORT,
+    startedAt: Date.now(),
+    notebooks: []
+  };
+
+  await writeRegistry(registry);
+  console.error(`[Server] Registered instance ${INSTANCE_ID} (ws: ${WS_PORT}, http: ${HTTP_PORT})`);
+}
+
+/**
+ * Unregister this instance from the registry
+ */
+async function unregisterInstance() {
+  try {
+    const registry = await readRegistry();
+    // Release ownership if we were the owner
+    if (registry.owner === INSTANCE_ID) {
+      registry.owner = null;
+      console.error(`[Server] Released ownership: ${INSTANCE_ID}`);
+    }
+    delete registry.instances[INSTANCE_ID];
+    await writeRegistry(registry);
+    console.error(`[Server] Unregistered instance ${INSTANCE_ID}`);
+  } catch (err) {
+    console.error('[Server] Error unregistering:', err.message);
+  }
+}
+
+/**
+ * Find a live owner instance in the registry
+ * Returns { id, ...info } if found, null otherwise
+ */
+async function findLiveOwner() {
+  const registry = await readRegistry();
+
+  if (!registry.owner) return null;
+
+  const ownerInfo = registry.instances[registry.owner];
+  if (!ownerInfo) return null;
+
+  // Owner is alive (readRegistry already pruned dead instances)
+  return { id: registry.owner, ...ownerInfo };
+}
+
+/**
+ * Set this instance as the owner in the registry
+ */
+async function becomeOwner() {
+  const registry = await readRegistry();
+  registry.owner = INSTANCE_ID;
+  if (registry.instances[INSTANCE_ID]) {
+    registry.instances[INSTANCE_ID].isOwner = true;
+  }
+  await writeRegistry(registry);
+  console.error(`[Server] Became owner: ${INSTANCE_ID}`);
+}
+
+/**
+ * Clear owner status when shutting down (if we're the owner)
+ */
+async function releaseOwnership() {
+  try {
+    const registry = await readRegistry();
+    if (registry.owner === INSTANCE_ID) {
+      registry.owner = null;
+      console.error(`[Server] Released ownership: ${INSTANCE_ID}`);
+    }
+    if (registry.instances[INSTANCE_ID]) {
+      delete registry.instances[INSTANCE_ID].isOwner;
+    }
+    await writeRegistry(registry);
+  } catch (err) {
+    console.error('[Server] Error releasing ownership:', err.message);
+  }
+}
+
+/**
+ * Claim a notebook for this instance
+ */
+async function claimNotebook(notebookPath) {
+  if (claimedNotebooks.has(notebookPath)) return;
+
+  claimedNotebooks.add(notebookPath);
+
+  try {
+    const registry = await readRegistry();
+
+    // Remove this notebook from any other instance that might have claimed it
+    for (const [id, info] of Object.entries(registry.instances)) {
+      if (id !== INSTANCE_ID && info.notebooks) {
+        info.notebooks = info.notebooks.filter(n => n !== notebookPath);
+      }
+    }
+
+    // Add to this instance
+    if (registry.instances[INSTANCE_ID]) {
+      if (!registry.instances[INSTANCE_ID].notebooks) {
+        registry.instances[INSTANCE_ID].notebooks = [];
+      }
+      if (!registry.instances[INSTANCE_ID].notebooks.includes(notebookPath)) {
+        registry.instances[INSTANCE_ID].notebooks.push(notebookPath);
+      }
+    }
+
+    await writeRegistry(registry);
+    console.error(`[Server] Claimed notebook: ${notebookPath}`);
+  } catch (err) {
+    console.error('[Server] Error claiming notebook:', err.message);
   }
 }
 
@@ -108,31 +304,10 @@ async function cleanupOldResponses() {
   }
 }
 
-/**
- * Write the current ports to the port file
- */
-async function writePortFile() {
-  await ensureDebugDir();
-  await writeFile(PORT_FILE, JSON.stringify({ http: HTTP_PORT, ws: WS_PORT }, null, 2));
-  console.error(`[Server] Port file written to ${PORT_FILE}`);
-}
-
-/**
- * Clean up port file on exit
- */
-async function cleanupPortFile() {
-  try {
-    if (existsSync(PORT_FILE)) {
-      await rm(PORT_FILE);
-      console.error('[Server] Port file cleaned up');
-    }
-  } catch (err) {
-    // Ignore cleanup errors
-  }
-}
 
 /**
  * Try to start HTTP server on a port, returns true if successful
+ * Tests both IPv4 (0.0.0.0) to match actual server bind
  */
 function tryHttpPort(port) {
   return new Promise((resolve) => {
@@ -145,7 +320,8 @@ function tryHttpPort(port) {
       testServer.close();
       resolve(true);
     });
-    testServer.listen(port);
+    // Explicitly bind to 0.0.0.0 to match actual server configuration
+    testServer.listen(port, '0.0.0.0');
   });
 }
 
@@ -174,6 +350,9 @@ let currentSessionId = null;
 // Connected browser clients: Map<WebSocket, { url, connectedAt, sessionId }>
 const clients = new Map();
 
+// The notebook this MCP instance has claimed (for multi-notebook scenarios)
+let focusedNotebook = null;
+
 // Pending requests (for bidirectional communication)
 const pendingRequests = new Map();
 let requestCounter = 0;
@@ -199,7 +378,7 @@ function getNotebookId(url) {
  */
 function findClient(notebook) {
   if (!notebook) {
-    // No notebook specified - return the only client or error
+    // No notebook specified - check if we have a focused notebook
     if (clients.size === 0) {
       return { error: 'No connected notebooks' };
     }
@@ -207,11 +386,27 @@ function findClient(notebook) {
       const [client, info] = clients.entries().next().value;
       return { client, info };
     }
-    // Multiple clients - list them
+
+    // Multiple clients - try to use focused notebook
+    if (focusedNotebook) {
+      // Search for the focused notebook
+      for (const [client, info] of clients.entries()) {
+        if (info.url === focusedNotebook || getNotebookId(info.url) === focusedNotebook) {
+          return { client, info };
+        }
+      }
+      // Focused notebook not connected anymore
+      const list = Array.from(clients.values())
+        .map((info, i) => `  ${i}: ${getNotebookId(info.url)}`)
+        .join('\n');
+      return { error: `Focused notebook "${focusedNotebook}" is no longer connected. Use FocusNotebook to select one:\n${list}` };
+    }
+
+    // Multiple clients, no focus set - require explicit selection
     const list = Array.from(clients.values())
       .map((info, i) => `  ${i}: ${getNotebookId(info.url)} (${info.url})`)
       .join('\n');
-    return { error: `Multiple notebooks connected. Specify which one:\n${list}` };
+    return { error: `Multiple notebooks connected. Use FocusNotebook to select which one to work with:\n${list}` };
   }
 
   // Try to find by index (number)
@@ -249,6 +444,9 @@ function findClient(notebook) {
 let httpServer = null;
 let wss = null;
 
+// Tool executor function (set after MCP handler is defined)
+let executeToolCall = null;
+
 /**
  * Create and start HTTP server for status/session endpoints
  */
@@ -275,9 +473,11 @@ function createHttpServer() {
         sessionId: info.sessionId
       }));
       res.end(JSON.stringify({
+        instanceId: INSTANCE_ID,
         currentSession: currentSessionId,
         sessions: Array.from(sessions.keys()),
         notebooks,
+        claimedNotebooks: Array.from(claimedNotebooks),
         connectedClients: clients.size,
         ports: { http: HTTP_PORT, ws: WS_PORT }
       }));
@@ -292,6 +492,33 @@ function createHttpServer() {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Session not found' }));
       }
+    } else if (req.url === '/mcp/call' && req.method === 'POST') {
+      // Proxy endpoint for client instances to forward MCP tool calls
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const { tool, args } = JSON.parse(body);
+
+          if (!executeToolCall) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Tool executor not initialized' }));
+            return;
+          }
+
+          const result = await executeToolCall(tool, args || {});
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return; // Don't fall through
+    } else if (req.url === '/ping') {
+      // Health check endpoint for client instances
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, instanceId: INSTANCE_ID, timestamp: Date.now() }));
     } else {
       res.writeHead(200, { 'Content-Type': 'text/plain' });
       res.end('Debug Server Running\n');
@@ -424,6 +651,12 @@ function handleBrowserMessage(message, ws) {
       clientInfo.url = data.url;
       clientInfo.sessionId = sessionId;
       console.error(`[Server] Notebook connected: ${getNotebookId(data.url)} (${data.url})`);
+
+      // Claim this notebook for this instance
+      const notebookPath = getNotebookId(data.url);
+      claimNotebook(notebookPath).catch(err => {
+        console.error('[Server] Failed to claim notebook:', err.message);
+      });
     }
 
     const existing = sessions.get(sessionId);
@@ -989,7 +1222,7 @@ const server = new Server(
 // Common notebook parameter for all tools
 const notebookParam = {
   type: 'string',
-  description: 'Target notebook (URL, path like "index" or "second-notebook", or index like "0"). Required when multiple notebooks are connected.'
+  description: 'Target notebook (URL, path like "index" or "voronoi", or index like "0"). Optional if you\'ve used FocusNotebook or only one notebook is connected.'
 };
 
 // Common label parameter for all tools
@@ -1008,6 +1241,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: 'object',
           properties: {}
+        }
+      },
+      {
+        name: 'FocusNotebook',
+        description: 'Focus on a specific notebook. When multiple notebooks are connected, this sets which one receives commands by default. Use ListNotebooks to see available options.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            notebook: {
+              type: 'string',
+              description: 'Target notebook (URL, path like "index" or "voronoi", or index like "0")'
+            }
+          },
+          required: ['notebook']
         }
       },
       {
@@ -1471,17 +1718,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-// Handle tool calls
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
+/**
+ * Execute a tool call - shared between MCP handler and HTTP proxy
+ */
+async function handleToolExecution(name, args) {
   try {
     if (name === 'ListNotebooks') {
       if (clients.size === 0) {
         return {
           content: [{
             type: 'text',
-            text: 'No notebooks connected.\n\nMake sure your notebook is running with the debug plugin enabled.'
+            text: `No notebooks connected to this instance (${INSTANCE_ID}).\n\nMake sure your notebook is running with the debug plugin enabled.`
           }]
         };
       }
@@ -1492,11 +1739,82 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return `${i}: ${id}\n   URL: ${info.url}\n   Connected: ${connectedAgo}s ago`;
       });
 
+      const focusInfo = focusedNotebook ? `\nFocused: ${focusedNotebook}` : '\nNo notebook focused (use FocusNotebook if needed)';
       return {
         content: [{
           type: 'text',
-          text: `Connected notebooks (${clients.size}):\n\n${notebooks.join('\n\n')}`
+          text: `Instance: ${INSTANCE_ID}${focusInfo}\nConnected notebooks (${clients.size}):\n\n${notebooks.join('\n\n')}`
         }]
+      };
+    }
+
+    if (name === 'FocusNotebook') {
+      const { notebook } = args;
+
+      if (!notebook) {
+        return {
+          content: [{ type: 'text', text: 'Error: notebook is required' }],
+          isError: true
+        };
+      }
+
+      // Verify the notebook exists
+      const result = findClient(notebook);
+      if (result.error && !result.error.includes('Multiple notebooks')) {
+        // The notebook wasn't found
+        return {
+          content: [{ type: 'text', text: result.error }],
+          isError: true
+        };
+      }
+
+      // Find the actual notebook ID to store
+      let targetNotebook = notebook;
+      for (const [client, info] of clients.entries()) {
+        const id = getNotebookId(info.url);
+        if (info.url === notebook || id === notebook || info.url.includes(notebook) || id.includes(notebook)) {
+          targetNotebook = id;
+          focusedNotebook = id;
+
+          // Also claim this notebook in the registry
+          claimNotebook(id).catch(err => {
+            console.error('[Server] Failed to claim notebook:', err.message);
+          });
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Focused on notebook: ${id}\nURL: ${info.url}\n\nAll subsequent commands will target this notebook.`
+            }]
+          };
+        }
+      }
+
+      // Try by index
+      const index = parseInt(notebook, 10);
+      if (!isNaN(index)) {
+        const entries = Array.from(clients.entries());
+        if (index >= 0 && index < entries.length) {
+          const [client, info] = entries[index];
+          const id = getNotebookId(info.url);
+          focusedNotebook = id;
+
+          claimNotebook(id).catch(err => {
+            console.error('[Server] Failed to claim notebook:', err.message);
+          });
+
+          return {
+            content: [{
+              type: 'text',
+              text: `Focused on notebook: ${id}\nURL: ${info.url}\n\nAll subsequent commands will target this notebook.`
+            }]
+          };
+        }
+      }
+
+      return {
+        content: [{ type: 'text', text: `Notebook "${notebook}" not found` }],
+        isError: true
       };
     }
 
@@ -2192,12 +2510,219 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       isError: true
     };
   }
+}
+
+// Set up the tool executor for HTTP proxy endpoint
+executeToolCall = handleToolExecution;
+
+// Handle MCP tool calls - uses executeToolCall which may forward to owner
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  return executeToolCall(name, args || {});
 });
 
-// Start servers
-async function main() {
-  // Clean up old response files from previous sessions
-  await cleanupOldResponses();
+// Owner health check interval
+const OWNER_HEALTH_CHECK_INTERVAL = 5000; // 5 seconds
+let ownerHealthCheckTimer = null;
+let isRunningAsClient = false;
+let currentOwner = null;
+
+/**
+ * Make an HTTP request to the owner
+ */
+async function httpRequest(url, options = {}) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const reqOptions = {
+      hostname: urlObj.hostname,
+      port: urlObj.port,
+      path: urlObj.pathname,
+      method: options.method || 'GET',
+      headers: options.headers || {}
+    };
+
+    const req = http.request(reqOptions, (res) => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve({ status: res.statusCode, data: JSON.parse(data) });
+        } catch {
+          resolve({ status: res.statusCode, data });
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.setTimeout(5000, () => {
+      req.destroy();
+      reject(new Error('Request timeout'));
+    });
+
+    if (options.body) {
+      req.write(options.body);
+    }
+    req.end();
+  });
+}
+
+/**
+ * Forward a tool call to the owner via HTTP
+ * Some tools (FocusNotebook, ListNotebooks) are handled locally
+ */
+async function forwardToolCallToOwner(name, args) {
+  if (!currentOwner) {
+    throw new Error('No owner available');
+  }
+
+  // FocusNotebook is handled locally - just store the focused notebook
+  if (name === 'FocusNotebook') {
+    const { notebook } = args || {};
+    if (!notebook) {
+      return {
+        content: [{ type: 'text', text: 'Error: notebook is required' }],
+        isError: true
+      };
+    }
+    // Store locally and verify it exists by querying owner's ListNotebooks
+    const listResult = await forwardToolCallToOwner('ListNotebooks', {});
+    const listText = listResult.content?.[0]?.text || '';
+
+    // Check if the notebook exists in the list
+    if (!listText.includes(notebook)) {
+      return {
+        content: [{ type: 'text', text: `Notebook "${notebook}" not found.\n\n${listText}` }],
+        isError: true
+      };
+    }
+
+    focusedNotebook = notebook;
+    return {
+      content: [{
+        type: 'text',
+        text: `Focused on notebook: ${notebook}\n\nAll subsequent commands will target this notebook.`
+      }]
+    };
+  }
+
+  // ListNotebooks - forward to owner but add local focus info
+  if (name === 'ListNotebooks') {
+    const url = `http://localhost:${currentOwner.http}/mcp/call`;
+    const response = await httpRequest(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool: name, args: args || {} })
+    });
+
+    if (response.status !== 200) {
+      throw new Error(response.data?.error || 'Owner request failed');
+    }
+
+    // Modify the response to show local focus state
+    const result = response.data;
+    if (result.content?.[0]?.text) {
+      let text = result.content[0].text;
+      // Replace the owner's focus info with our local focus
+      text = text.replace(/\nFocused:.*/, '');
+      text = text.replace(/\nNo notebook focused.*/, '');
+      const focusInfo = focusedNotebook
+        ? `\nFocused: ${focusedNotebook}`
+        : '\nNo notebook focused (use FocusNotebook if needed)';
+      // Insert after instance line
+      text = text.replace(/(Instance: [^\n]+)/, `$1${focusInfo}`);
+      result.content[0].text = text;
+    }
+    return result;
+  }
+
+  // For other tools, inject the notebook parameter if we have a local focus
+  const forwardArgs = { ...args };
+  if (focusedNotebook && !forwardArgs.notebook) {
+    forwardArgs.notebook = focusedNotebook;
+  }
+
+  const url = `http://localhost:${currentOwner.http}/mcp/call`;
+  const response = await httpRequest(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tool: name, args: forwardArgs })
+  });
+
+  if (response.status !== 200) {
+    throw new Error(response.data?.error || 'Owner request failed');
+  }
+
+  return response.data;
+}
+
+/**
+ * Check if the owner is still alive
+ */
+async function checkOwnerHealth() {
+  if (!currentOwner) return false;
+
+  try {
+    const url = `http://localhost:${currentOwner.http}/ping`;
+    const response = await httpRequest(url);
+    return response.status === 200 && response.data?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Promote this client instance to owner
+ */
+async function promoteToOwner() {
+  console.error('[Server] Owner died, promoting to owner...');
+
+  // Stop health check
+  if (ownerHealthCheckTimer) {
+    clearInterval(ownerHealthCheckTimer);
+    ownerHealthCheckTimer = null;
+  }
+
+  isRunningAsClient = false;
+  currentOwner = null;
+
+  // Start our own servers
+  console.error('[Server] Finding available ports...');
+  const ports = await findAvailablePorts();
+  HTTP_PORT = ports.httpPort;
+  WS_PORT = ports.wsPort;
+  console.error(`[Server] Using ports: HTTP=${HTTP_PORT}, WS=${WS_PORT}`);
+
+  createHttpServer();
+  createWebSocketServer();
+
+  // Update registry - register ourselves and become owner
+  await registerInstance();
+  await becomeOwner();
+
+  // Switch tool executor back to local execution
+  executeToolCall = handleToolExecution;
+
+  console.error('[Server] Promoted to owner successfully');
+}
+
+/**
+ * Start owner health monitoring
+ */
+function startOwnerHealthCheck() {
+  ownerHealthCheckTimer = setInterval(async () => {
+    const healthy = await checkOwnerHealth();
+    if (!healthy) {
+      console.error('[Server] Owner health check failed');
+      await promoteToOwner();
+    }
+  }, OWNER_HEALTH_CHECK_INTERVAL);
+}
+
+/**
+ * Run as owner - start HTTP/WebSocket servers
+ */
+async function runAsOwner() {
+  console.error('[Server] Running as owner');
 
   // Find available ports
   console.error('[Server] Finding available ports...');
@@ -2210,25 +2735,91 @@ async function main() {
   createHttpServer();
   createWebSocketServer();
 
-  // Write port file for Vite plugin to read
-  await writePortFile();
+  // Register this instance and become owner
+  await registerInstance();
+  await becomeOwner();
+
+  // Tool executor uses local execution
+  executeToolCall = handleToolExecution;
+}
+
+/**
+ * Run as client - proxy to owner
+ */
+async function runAsClient(owner) {
+  console.error(`[Server] Running as client, owner: ${owner.id} (http: ${owner.http})`);
+
+  isRunningAsClient = true;
+  currentOwner = owner;
+
+  // Register ourselves as a client instance (no ports)
+  const registry = await readRegistry();
+  registry.instances[INSTANCE_ID] = {
+    pid: process.pid,
+    isClient: true,
+    ownerHttp: owner.http,
+    startedAt: Date.now()
+  };
+  await writeRegistry(registry);
+  console.error(`[Server] Registered as client instance ${INSTANCE_ID}`);
+
+  // Override tool executor to forward to owner
+  executeToolCall = forwardToolCallToOwner;
+
+  // Start health monitoring
+  startOwnerHealthCheck();
+}
+
+// Start servers
+async function main() {
+  // Clean up old response files from previous sessions
+  await cleanupOldResponses();
+
+  // Read and prune the registry first (cleans up dead instances)
+  await readRegistry();
+
+  // Check if there's already a live owner
+  const existingOwner = await findLiveOwner();
+
+  if (existingOwner) {
+    // Run as client - proxy to existing owner
+    await runAsClient(existingOwner);
+  } else {
+    // Run as owner - start servers
+    await runAsOwner();
+  }
 
   // Set up cleanup on exit
   const cleanup = async () => {
-    await cleanupPortFile();
+    // Stop health check timer if running as client
+    if (ownerHealthCheckTimer) {
+      clearInterval(ownerHealthCheckTimer);
+      ownerHealthCheckTimer = null;
+    }
+    await unregisterInstance();
     process.exit(0);
   };
 
   process.on('SIGINT', cleanup);
   process.on('SIGTERM', cleanup);
   process.on('exit', () => {
-    // Synchronous cleanup attempt on exit
+    // Synchronous cleanup attempt on exit - try to remove ourselves from registry
     try {
-      if (existsSync(PORT_FILE)) {
-        require('fs').unlinkSync(PORT_FILE);
+      if (existsSync(REGISTRY_FILE)) {
+        const fs = require('fs');
+        const content = fs.readFileSync(REGISTRY_FILE, 'utf-8');
+        // Handle empty file gracefully
+        if (!content.trim()) {
+          return;
+        }
+        const registry = JSON.parse(content);
+        if (registry.instances) {
+          delete registry.instances[INSTANCE_ID];
+          fs.writeFileSync(REGISTRY_FILE, JSON.stringify(registry, null, 2));
+        }
       }
     } catch (err) {
-      // Ignore
+      // Ignore cleanup errors
     }
   });
 

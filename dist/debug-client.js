@@ -3277,9 +3277,18 @@
         }
       }, 100);
     }
+    /**
+     * Get the notebook path identifier from the current URL
+     */
+    getNotebookPath() {
+      let path = window.location.pathname.replace(/^\//, "") || "index";
+      path = path.replace(/\.html$/, "");
+      return path;
+    }
     connect() {
       const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${wsProtocol}//${window.location.host}/__debug_ws`;
+      const notebookPath = encodeURIComponent(this.getNotebookPath());
+      const wsUrl = `${wsProtocol}//${window.location.host}/__debug_ws/${notebookPath}`;
       const MAX_CONNECT_ATTEMPTS = 5;
       if (this.connecting) {
         return;

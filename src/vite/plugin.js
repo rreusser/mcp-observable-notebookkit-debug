@@ -32,13 +32,81 @@ function readClientFile(url) {
 const VIRTUAL_RUNTIME_ID = "virtual:debug-notebook-runtime";
 const RESOLVED_VIRTUAL_RUNTIME_ID = "\0" + VIRTUAL_RUNTIME_ID;
 
-// Default ports (fallback if port file not found)
+// Default ports (fallback if registry not found)
 const DEFAULT_WS_PORT = 9899;
 
 /**
- * Read the port configuration from .notebookkit-debug/port
+ * Check if a process is still running
+ */
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read the instance registry, returning live instances
+ */
+function readRegistry(projectRoot) {
+  const registryFile = join(projectRoot, ".notebookkit-debug", "registry.json");
+  try {
+    if (existsSync(registryFile)) {
+      const registry = JSON.parse(readFileSync(registryFile, "utf-8"));
+
+      // Filter to only live instances
+      const liveInstances = {};
+      for (const [id, info] of Object.entries(registry.instances || {})) {
+        if (isProcessAlive(info.pid)) {
+          liveInstances[id] = info;
+        }
+      }
+
+      return { instances: liveInstances };
+    }
+  } catch (err) {
+    console.warn("[debug-notebook] Could not read registry:", err.message);
+  }
+  return { instances: {} };
+}
+
+/**
+ * Find the best instance for a given notebook path
+ */
+function findInstanceForNotebook(registry, notebookPath) {
+  // First, try to find an instance that has claimed this notebook
+  for (const [id, info] of Object.entries(registry.instances)) {
+    if (info.notebooks && info.notebooks.includes(notebookPath)) {
+      return info;
+    }
+  }
+
+  // If not found, return any available instance (prefer ones with fewer notebooks)
+  const instances = Object.values(registry.instances);
+  if (instances.length === 0) return null;
+
+  // Sort by number of claimed notebooks (ascending)
+  instances.sort((a, b) => (a.notebooks?.length || 0) - (b.notebooks?.length || 0));
+  return instances[0];
+}
+
+/**
+ * Read the port configuration (legacy support + new registry)
  */
 function readPortConfig(projectRoot) {
+  // Try the new registry first
+  const registry = readRegistry(projectRoot);
+  const instances = Object.values(registry.instances);
+
+  if (instances.length > 0) {
+    // Return the first instance's WS port as the default
+    // The actual routing happens in the WebSocket upgrade handler
+    return { ws: instances[0].ws, registry: true, instanceCount: instances.length };
+  }
+
+  // Fall back to legacy port file
   const portFile = join(projectRoot, ".notebookkit-debug", "port");
   try {
     if (existsSync(portFile)) {
@@ -48,6 +116,7 @@ function readPortConfig(projectRoot) {
   } catch (err) {
     console.warn("[debug-notebook] Could not read port file:", err.message);
   }
+
   return { ws: DEFAULT_WS_PORT };
 }
 
@@ -91,36 +160,71 @@ export function debugNotebook() {
 
     // Serve the virtual module via HTTP and proxy WebSocket connections
     configureServer(server) {
-      // Proxy WebSocket connections to the MCP server
-      const portConfig = readPortConfig(projectRoot);
-      const wsPort = portConfig.ws || DEFAULT_WS_PORT;
-
       server.httpServer?.on('upgrade', (req, socket, head) => {
-        // Only proxy requests to our debug path
-        if (req.url === '/__debug_ws') {
-          const targetSocket = netConnect(wsPort, 'localhost', () => {
-            // Forward the upgrade request
-            targetSocket.write(
-              `GET / HTTP/1.1\r\n` +
-              `Host: localhost:${wsPort}\r\n` +
-              `Upgrade: websocket\r\n` +
-              `Connection: Upgrade\r\n` +
-              `Sec-WebSocket-Key: ${req.headers['sec-websocket-key']}\r\n` +
-              `Sec-WebSocket-Version: ${req.headers['sec-websocket-version']}\r\n` +
-              `\r\n`
-            );
-            // Pipe data between client and target
-            socket.pipe(targetSocket);
-            targetSocket.pipe(socket);
-          });
+        // Only proxy requests to our debug paths
+        // Supports both /__debug_ws and /__debug_ws/<notebook-path>
+        if (!req.url?.startsWith('/__debug_ws')) return;
 
-          targetSocket.on('error', (err) => {
-            console.error('[debug-notebook] WebSocket proxy error:', err.message);
-            socket.destroy();
-          });
-
-          socket.on('error', () => targetSocket.destroy());
+        // Extract notebook path from URL if present
+        // Format: /__debug_ws or /__debug_ws/<encoded-notebook-path>
+        let notebookPath = null;
+        if (req.url.length > '/__debug_ws'.length) {
+          const pathPart = req.url.slice('/__debug_ws/'.length);
+          // Handle query params if any
+          const queryIndex = pathPart.indexOf('?');
+          const encodedPath = queryIndex >= 0 ? pathPart.slice(0, queryIndex) : pathPart;
+          notebookPath = decodeURIComponent(encodedPath);
         }
+
+        // Read registry and find the appropriate instance
+        const registry = readRegistry(projectRoot);
+        let targetInstance = null;
+
+        if (notebookPath) {
+          targetInstance = findInstanceForNotebook(registry, notebookPath);
+          if (targetInstance) {
+            console.log(`[debug-notebook] Routing ${notebookPath} to instance on port ${targetInstance.ws}`);
+          }
+        }
+
+        // Fall back to any available instance
+        if (!targetInstance) {
+          const instances = Object.values(registry.instances);
+          if (instances.length > 0) {
+            targetInstance = instances[0];
+          }
+        }
+
+        // If still no instance, try legacy port config
+        if (!targetInstance) {
+          const legacyConfig = readPortConfig(projectRoot);
+          targetInstance = { ws: legacyConfig.ws };
+        }
+
+        const wsPort = targetInstance.ws || DEFAULT_WS_PORT;
+
+        const targetSocket = netConnect(wsPort, 'localhost', () => {
+          // Forward the upgrade request
+          targetSocket.write(
+            `GET / HTTP/1.1\r\n` +
+            `Host: localhost:${wsPort}\r\n` +
+            `Upgrade: websocket\r\n` +
+            `Connection: Upgrade\r\n` +
+            `Sec-WebSocket-Key: ${req.headers['sec-websocket-key']}\r\n` +
+            `Sec-WebSocket-Version: ${req.headers['sec-websocket-version']}\r\n` +
+            `\r\n`
+          );
+          // Pipe data between client and target
+          socket.pipe(targetSocket);
+          targetSocket.pipe(socket);
+        });
+
+        targetSocket.on('error', (err) => {
+          console.error('[debug-notebook] WebSocket proxy error:', err.message);
+          socket.destroy();
+        });
+
+        socket.on('error', () => targetSocket.destroy());
       });
 
       server.middlewares.use(async (req, res, next) => {
