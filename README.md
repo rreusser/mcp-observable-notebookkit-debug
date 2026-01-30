@@ -70,9 +70,7 @@ These tools interact directly with the Observable runtime's reactive graph.
 | `GetValueMetadata`        | Get metadata: state, type, dependencies (inputs), and dependents (outputs)  |
 | `GetDependencyGraph`      | Get the dependency graph showing how values depend on each other            |
 | `SetInputValue`           | Set an input widget's `.value` property and trigger reactive updates        |
-| `DefineVariable`          | Inject an ephemeral value into the runtime (prefer over Eval for derived values) |
-| `DeleteVariable`          | Delete an injected ephemeral value                                          |
-| `ListInjectedVariables`   | List all ephemeral values injected into the runtime                         |
+| `RuntimeEval`             | Evaluate an expression with access to all notebook variables                |
 
 ### Browser Tools
 
@@ -80,7 +78,7 @@ These tools interact with the browser/DOM context, outside the Observable runtim
 
 | Tool                      | Description                                                                 |
 | ------------------------- | --------------------------------------------------------------------------- |
-| `Eval`                    | Execute JavaScript in the browser (last resort when runtime tools don't suffice) |
+| `BrowserEval`             | Execute JavaScript in the browser (has DOM access but NOT Observable runtime) |
 | `GetElementContent`       | Get content from a DOM element by CSS selector; captures canvas/SVG as images |
 | `MouseClick`              | Simulate a mouse click at a position or on an element                       |
 | `MouseDrag`               | Simulate a mouse drag from start to end position                            |
@@ -137,31 +135,34 @@ The `GetValue` and `GetValues` tools return state information along with the val
 
 No need to save to files - images are returned directly in the MCP response.
 
-### Ephemeral Variables
+### Runtime Evaluation
 
-Use `DefineVariable` to inject temporary variables into the Observable runtime for debugging and exploration. These variables participate in the reactive graph and can depend on existing notebook values.
+Use `RuntimeEval` to evaluate expressions in the Observable runtime context with access to all notebook variables. The body must use a `return` statement.
 
 ```javascript
-// Define a variable that computes from existing values
-DefineVariable({
-  name: "myVar",
-  expression: "number * 2 + chainBase"
+// Compute derived values from notebook variables
+RuntimeEval({ body: "return number * 2 + rangeValue" })
+
+// Filter or transform data
+RuntimeEval({ body: "return data.filter(d => d.value > 0)" })
+
+// Multi-statement expressions
+RuntimeEval({
+  body: `
+    const doubled = number * 2;
+    const added = doubled + rangeValue;
+    return { doubled, added };
+  `
 })
 
-// Use an IIFE for multi-statement expressions
-DefineVariable({
-  name: "complex",
-  expression: `(() => {
-    const doubled = number * 2;
-    const added = doubled + chainBase;
-    return { doubled, added };
-  })()`
+// Persist the result as a named variable for later retrieval
+RuntimeEval({
+  name: "myResult",
+  body: "return number * 2"
 })
 ```
 
-Dependencies are auto-detected from the expression. Use `ListInjectedVariables` to see all injected variables and `DeleteVariable` to remove them.
-
-Note: You cannot define a variable with the same name as an existing notebook value.
+Dependencies are auto-detected from the expression. If `name` is provided, the result persists in the runtime and can be retrieved with `GetValue`. If `name` starts with `_tmp_`, it is automatically deleted after the value resolves.
 
 ### Setting Input Values
 

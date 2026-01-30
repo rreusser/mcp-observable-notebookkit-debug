@@ -1039,7 +1039,7 @@
   }
 
   // src/vite/client/handlers/eval.js
-  async function handleEvalRequest(client, message) {
+  async function handleBrowserEvalRequest(client, message) {
     const { code } = message;
     try {
       const AsyncFunction = Object.getPrototypeOf(async function() {
@@ -1052,14 +1052,14 @@
       }
       const result = await fn();
       client.send({
-        type: "eval_response",
+        type: "browser_eval_response",
         requestId: message.requestId,
         success: true,
         result: await serializeValueAsync(result)
       });
     } catch (error) {
       client.send({
-        type: "eval_response",
+        type: "browser_eval_response",
         requestId: message.requestId,
         success: true,
         // Request succeeded, but code threw an error
@@ -1070,86 +1070,6 @@
   }
 
   // src/vite/client/handlers/variables.js
-  async function handleDefineVariableRequest(client, message) {
-    const { name, inputs, expression } = message;
-    const runtime = getRuntimeModule();
-    if (!runtime) {
-      client.send({
-        type: "define_response",
-        requestId: message.requestId,
-        name,
-        success: false,
-        error: "Observable runtime not found"
-      });
-      return;
-    }
-    try {
-      let deps = inputs;
-      if (!deps) {
-        deps = detectDependencies(runtime, expression);
-      }
-      const AsyncFunction = Object.getPrototypeOf(async function() {
-      }).constructor;
-      const fn = new AsyncFunction(...deps, `return (${expression})`);
-      if (runtime._scope && runtime._scope.has(name) && !client.injectedVariables.has(name)) {
-        client.send({
-          type: "define_response",
-          requestId: message.requestId,
-          name,
-          success: false,
-          error: `Cannot define "${name}": a variable with this name already exists in the notebook`
-        });
-        return;
-      }
-      if (client.injectedVariables.has(name)) {
-        client.injectedVariables.get(name).delete();
-        client.injectedVariables.delete(name);
-      }
-      const variable = runtime.define(name, deps, fn);
-      client.injectedVariables.set(name, variable);
-      const result = await getValueState(runtime, name, message.timeout || 5e3);
-      if (result.state === "fulfilled") {
-        client.send({
-          type: "define_response",
-          requestId: message.requestId,
-          name,
-          success: true,
-          state: "fulfilled",
-          value: await serializeValueAsync(result.value),
-          inputs: deps
-        });
-      } else if (result.state === "pending") {
-        client.send({
-          type: "define_response",
-          requestId: message.requestId,
-          name,
-          success: true,
-          state: "pending",
-          inputs: deps
-        });
-      } else {
-        client.send({
-          type: "define_response",
-          requestId: message.requestId,
-          name,
-          success: true,
-          state: "rejected",
-          error: result.error,
-          stack: result.stack,
-          inputs: deps
-        });
-      }
-    } catch (error) {
-      client.send({
-        type: "define_response",
-        requestId: message.requestId,
-        name,
-        success: false,
-        error: error.message,
-        stack: error.stack
-      });
-    }
-  }
   function detectDependencies(runtime, expression) {
     if (!runtime._scope) return [];
     const scopeNames = new Set(
@@ -1248,46 +1168,69 @@
     ]);
     return keywords.has(word);
   }
-  async function handleDeleteVariableRequest(client, message) {
-    const { name } = message;
-    if (!client.injectedVariables.has(name)) {
+  async function handleRuntimeEvalRequest(client, message) {
+    const { name, body, timeout = 1e4 } = message;
+    const runtime = getRuntimeModule();
+    if (!runtime) {
       client.send({
-        type: "delete_response",
+        type: "runtime_eval_response",
         requestId: message.requestId,
-        name,
         success: false,
-        error: `No injected variable named "${name}" found`
+        error: "Observable runtime not found"
       });
       return;
     }
     try {
-      const variable = client.injectedVariables.get(name);
-      variable.delete();
-      client.injectedVariables.delete(name);
-      client.send({
-        type: "delete_response",
-        requestId: message.requestId,
-        name,
-        success: true
-      });
+      const deps = detectDependencies(runtime, body);
+      const AsyncFunction = Object.getPrototypeOf(async function() {
+      }).constructor;
+      const fn = new AsyncFunction(...deps, body);
+      if (client.injectedVariables.has(name)) {
+        client.injectedVariables.get(name).delete();
+        client.injectedVariables.delete(name);
+      }
+      const variable = runtime.define(name, deps, fn);
+      client.injectedVariables.set(name, variable);
+      const result = await getValueState(runtime, name, timeout);
+      const isTemporary = name.startsWith("_tmp_");
+      if (isTemporary && client.injectedVariables.has(name)) {
+        client.injectedVariables.get(name).delete();
+        client.injectedVariables.delete(name);
+      }
+      if (result.state === "fulfilled") {
+        client.send({
+          type: "runtime_eval_response",
+          requestId: message.requestId,
+          success: true,
+          state: "fulfilled",
+          value: await serializeValueAsync(result.value)
+        });
+      } else if (result.state === "pending") {
+        client.send({
+          type: "runtime_eval_response",
+          requestId: message.requestId,
+          success: true,
+          state: "pending"
+        });
+      } else {
+        client.send({
+          type: "runtime_eval_response",
+          requestId: message.requestId,
+          success: true,
+          state: "rejected",
+          error: result.error,
+          stack: result.stack
+        });
+      }
     } catch (error) {
       client.send({
-        type: "delete_response",
+        type: "runtime_eval_response",
         requestId: message.requestId,
-        name,
         success: false,
-        error: error.message
+        error: error.message,
+        stack: error.stack
       });
     }
-  }
-  function handleListInjectedVariablesRequest(client, message) {
-    const names = Array.from(client.injectedVariables.keys());
-    client.send({
-      type: "injected_list_response",
-      requestId: message.requestId,
-      success: true,
-      variables: names
-    });
   }
 
   // src/vite/client/ui/mouse-visualizer.js
@@ -3460,20 +3403,8 @@
         handleGetDependencyGraphRequest(this, message);
         return;
       }
-      if (message.type === "Eval") {
-        handleEvalRequest(this, message);
-        return;
-      }
-      if (message.type === "DefineVariable") {
-        handleDefineVariableRequest(this, message);
-        return;
-      }
-      if (message.type === "DeleteVariable") {
-        handleDeleteVariableRequest(this, message);
-        return;
-      }
-      if (message.type === "ListInjectedVariables") {
-        handleListInjectedVariablesRequest(this, message);
+      if (message.type === "BrowserEval") {
+        handleBrowserEvalRequest(this, message);
         return;
       }
       if (message.type === "MouseClick") {
@@ -3494,6 +3425,10 @@
       }
       if (message.type === "SendKeys") {
         handleSendKeysRequest(this, message);
+        return;
+      }
+      if (message.type === "RuntimeEval") {
+        handleRuntimeEvalRequest(this, message);
         return;
       }
     }

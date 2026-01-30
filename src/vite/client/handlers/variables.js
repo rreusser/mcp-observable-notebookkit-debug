@@ -1,112 +1,9 @@
 /**
- * Ephemeral variable handlers (DefineVariable, DeleteVariable, ListInjectedVariables)
+ * RuntimeEval handler - evaluate expressions in the Observable runtime context
  */
 
 import { getRuntimeModule, getValueState } from "../utils/runtime.js";
 import { serializeValueAsync } from "../utils/serialize.js";
-
-/**
- * Handle DefineVariable request - inject an ephemeral variable into the Observable runtime
- * The variable participates in the reactive graph and can depend on existing variables.
- *
- * Accepts either:
- * - { name, inputs, expression } - explicit dependencies and expression string
- * - { name, expression } - auto-detect dependencies from expression
- */
-export async function handleDefineVariableRequest(client, message) {
-  const { name, inputs, expression } = message;
-  const runtime = getRuntimeModule();
-
-  if (!runtime) {
-    client.send({
-      type: "define_response",
-      requestId: message.requestId,
-      name,
-      success: false,
-      error: "Observable runtime not found",
-    });
-    return;
-  }
-
-  try {
-    // If inputs not provided, try to auto-detect from expression
-    let deps = inputs;
-    if (!deps) {
-      deps = detectDependencies(runtime, expression);
-    }
-
-    // Build the definition function
-    // The function receives resolved values of dependencies in order
-    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-    const fn = new AsyncFunction(...deps, `return (${expression})`);
-
-    // Check for collision with notebook-defined variables
-    if (runtime._scope && runtime._scope.has(name) && !client.injectedVariables.has(name)) {
-      client.send({
-        type: "define_response",
-        requestId: message.requestId,
-        name,
-        success: false,
-        error: `Cannot define "${name}": a variable with this name already exists in the notebook`,
-      });
-      return;
-    }
-
-    // Delete any existing injected variable with this name
-    if (client.injectedVariables.has(name)) {
-      client.injectedVariables.get(name).delete();
-      client.injectedVariables.delete(name);
-    }
-
-    // Create the new variable in the runtime
-    const variable = runtime.define(name, deps, fn);
-    client.injectedVariables.set(name, variable);
-
-    // Wait for the value to be computed
-    const result = await getValueState(runtime, name, message.timeout || 5000);
-
-    if (result.state === "fulfilled") {
-      client.send({
-        type: "define_response",
-        requestId: message.requestId,
-        name,
-        success: true,
-        state: "fulfilled",
-        value: await serializeValueAsync(result.value),
-        inputs: deps,
-      });
-    } else if (result.state === "pending") {
-      client.send({
-        type: "define_response",
-        requestId: message.requestId,
-        name,
-        success: true,
-        state: "pending",
-        inputs: deps,
-      });
-    } else {
-      client.send({
-        type: "define_response",
-        requestId: message.requestId,
-        name,
-        success: true,
-        state: "rejected",
-        error: result.error,
-        stack: result.stack,
-        inputs: deps,
-      });
-    }
-  } catch (error) {
-    client.send({
-      type: "define_response",
-      requestId: message.requestId,
-      name,
-      success: false,
-      error: error.message,
-      stack: error.stack,
-    });
-  }
-}
 
 /**
  * Detect variable dependencies from an expression by checking which
@@ -161,54 +58,84 @@ function isJavaScriptKeyword(word) {
 }
 
 /**
- * Handle DeleteVariable request - remove an injected ephemeral variable
+ * Handle RuntimeEval request - evaluate an expression in the Observable runtime context.
+ * The body should contain a return statement.
+ * If name starts with _tmp_, the variable is auto-deleted after resolution.
  */
-export async function handleDeleteVariableRequest(client, message) {
-  const { name } = message;
+export async function handleRuntimeEvalRequest(client, message) {
+  const { name, body, timeout = 10000 } = message;
+  const runtime = getRuntimeModule();
 
-  if (!client.injectedVariables.has(name)) {
+  if (!runtime) {
     client.send({
-      type: "delete_response",
+      type: "runtime_eval_response",
       requestId: message.requestId,
-      name,
       success: false,
-      error: `No injected variable named "${name}" found`,
+      error: "Observable runtime not found",
     });
     return;
   }
 
   try {
-    const variable = client.injectedVariables.get(name);
-    variable.delete();
-    client.injectedVariables.delete(name);
+    // Auto-detect dependencies from the body
+    const deps = detectDependencies(runtime, body);
 
-    client.send({
-      type: "delete_response",
-      requestId: message.requestId,
-      name,
-      success: true,
-    });
+    // Build the definition function - body already contains return statement
+    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+    const fn = new AsyncFunction(...deps, body);
+
+    // Delete any existing injected variable with this name
+    if (client.injectedVariables.has(name)) {
+      client.injectedVariables.get(name).delete();
+      client.injectedVariables.delete(name);
+    }
+
+    // Create the variable in the runtime
+    const variable = runtime.define(name, deps, fn);
+    client.injectedVariables.set(name, variable);
+
+    // Wait for the value to be computed
+    const result = await getValueState(runtime, name, timeout);
+
+    // Auto-cleanup temporary variables (those starting with _tmp_)
+    const isTemporary = name.startsWith("_tmp_");
+    if (isTemporary && client.injectedVariables.has(name)) {
+      client.injectedVariables.get(name).delete();
+      client.injectedVariables.delete(name);
+    }
+
+    if (result.state === "fulfilled") {
+      client.send({
+        type: "runtime_eval_response",
+        requestId: message.requestId,
+        success: true,
+        state: "fulfilled",
+        value: await serializeValueAsync(result.value),
+      });
+    } else if (result.state === "pending") {
+      client.send({
+        type: "runtime_eval_response",
+        requestId: message.requestId,
+        success: true,
+        state: "pending",
+      });
+    } else {
+      client.send({
+        type: "runtime_eval_response",
+        requestId: message.requestId,
+        success: true,
+        state: "rejected",
+        error: result.error,
+        stack: result.stack,
+      });
+    }
   } catch (error) {
     client.send({
-      type: "delete_response",
+      type: "runtime_eval_response",
       requestId: message.requestId,
-      name,
       success: false,
       error: error.message,
+      stack: error.stack,
     });
   }
-}
-
-/**
- * Handle ListInjectedVariables request - list all ephemeral variables
- */
-export function handleListInjectedVariablesRequest(client, message) {
-  const names = Array.from(client.injectedVariables.keys());
-
-  client.send({
-    type: "injected_list_response",
-    requestId: message.requestId,
-    success: true,
-    variables: names,
-  });
 }

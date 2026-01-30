@@ -353,9 +353,8 @@ function handleBrowserMessage(message, ws) {
       type === 'cell_value_response' || type === 'cells_list_response' ||
       type === 'errors_response' || type === 'setinput_response' ||
       type === 'elementcontent_response' || type === 'dependencygraph_response' ||
-      type === 'eval_response' || type === 'mouse_response' ||
-      type === 'keyboard_response' || type === 'define_response' ||
-      type === 'delete_response' || type === 'injected_list_response') {
+      type === 'browser_eval_response' || type === 'mouse_response' ||
+      type === 'keyboard_response' || type === 'runtime_eval_response') {
     const pending = pendingRequests.get(requestId);
     if (pending) {
       clearTimeout(pending.timer);
@@ -594,10 +593,10 @@ async function requestDependencyGraph(filters = {}, timeout = DEFAULT_TIMEOUT, n
 }
 
 /**
- * Request JavaScript code execution in browser
+ * Request JavaScript code execution in browser context (outside Observable runtime)
  */
-async function requestEval(code, timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('Eval', { code }, timeout, notebook);
+async function requestBrowserEval(code, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('BrowserEval', { code }, timeout, notebook);
 }
 
 /**
@@ -636,24 +635,14 @@ async function requestSendKeys(keys, selector, modifiers, timeout = DEFAULT_TIME
 }
 
 /**
- * Request to define an ephemeral variable in the runtime
+ * Evaluate an expression in the Observable runtime context
+ * @param {string} name - Variable name (if starts with _tmp_, browser will delete after resolution)
+ * @param {string} body - Function body (must use return statement)
+ * @param {number} timeout - Timeout in ms
+ * @param {string} notebook - Target notebook
  */
-async function requestDefineVariable(name, inputs, expression, timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('DefineVariable', { name, inputs, expression, label: name }, timeout, notebook);
-}
-
-/**
- * Request to delete an injected variable
- */
-async function requestDeleteVariable(name, timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('DeleteVariable', { name, label: name }, timeout, notebook);
-}
-
-/**
- * Request list of injected variables
- */
-async function requestListInjectedVariables(timeout = DEFAULT_TIMEOUT, notebook = null) {
-  return createRequest('ListInjectedVariables', {}, timeout, notebook);
+async function requestRuntimeEval(name, body, timeout = DEFAULT_TIMEOUT, notebook = null) {
+  return createRequest('RuntimeEval', { name, body, label: name }, timeout, notebook);
 }
 
 /**
@@ -1246,8 +1235,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'Eval',
-        description: 'Execute JavaScript in the browser context. Runs outside the Observable runtime—use as a last resort when runtime-aware tools (GetValue, SetInput, DefineVariable) don\'t suffice. Useful for DOM inspection, computed styles, or browser APIs not exposed through the runtime.',
+        name: 'BrowserEval',
+        description: 'Execute JavaScript in the browser context. Has access to the DOM but NOT the Observable runtime. Use RuntimeEval instead when you need access to notebook variables. Useful for DOM inspection, computed styles, or browser APIs.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1455,67 +1444,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         }
       },
       {
-        name: 'DefineVariable',
-        description: 'Inject an ephemeral value into the Observable runtime. The value participates in the reactive graph and can depend on existing values. Prefer this over Eval when computing derived values from runtime state. Example: define "c" with expression "a + b" to compute the sum of values a and b.',
+        name: 'RuntimeEval',
+        description: 'Evaluate an expression in the Observable runtime context, with access to all notebook variables. Must use a return statement. Prefer this over Eval when computing derived values from runtime state. Examples: "return a + b" computes a sum; "return data.filter(d => d.value > 0)" filters a dataset.',
         inputSchema: {
           type: 'object',
           properties: {
             notebook: notebookParam,
+            body: {
+              type: 'string',
+              description: 'JavaScript code to evaluate. Must use "return" to produce a result. All notebook variables are accessible.'
+            },
             name: {
               type: 'string',
-              description: 'Name for the new variable'
-            },
-            expression: {
-              type: 'string',
-              description: 'JavaScript expression to compute the value. Can reference other notebook variables.'
-            },
-            inputs: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Explicit list of dependencies (variable names). If omitted, dependencies are auto-detected from the expression.'
+              description: 'If provided, the result persists in the runtime as a named variable for subsequent GetValue queries. If omitted, the result is returned and discarded.'
             },
             timeout_ms: {
               type: 'number',
-              description: 'Maximum time to wait for the value to resolve',
-              default: DEFAULT_TIMEOUT
+              description: 'Maximum time to wait for the value to resolve (default: 10 seconds)',
+              default: 10000
             }
           },
-          required: ['name', 'expression']
-        }
-      },
-      {
-        name: 'DeleteVariable',
-        description: 'Delete an ephemeral value that was previously injected into the Observable runtime with DefineVariable.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            notebook: notebookParam,
-            name: {
-              type: 'string',
-              description: 'Name of the injected variable to delete'
-            },
-            timeout_ms: {
-              type: 'number',
-              description: 'Maximum time to wait in milliseconds',
-              default: DEFAULT_TIMEOUT
-            }
-          },
-          required: ['name']
-        }
-      },
-      {
-        name: 'ListInjectedVariables',
-        description: 'List all ephemeral values that have been injected into the Observable runtime with DefineVariable.',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            notebook: notebookParam,
-            timeout_ms: {
-              type: 'number',
-              description: 'Maximum time to wait in milliseconds',
-              default: DEFAULT_TIMEOUT
-            }
-          }
+          required: ['body']
         }
       }
     ]
@@ -1966,7 +1915,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'Eval') {
+    if (name === 'BrowserEval') {
       const { notebook, code, timeout_ms = DEFAULT_TIMEOUT } = args;
 
       if (!code) {
@@ -1976,7 +1925,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const response = await requestEval(code, timeout_ms, notebook);
+      const response = await requestBrowserEval(code, timeout_ms, notebook);
 
       if (!response.success) {
         return {
@@ -2018,7 +1967,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const evalOutput = await handleLargeResponse(`Result:\n${formatValue(response.result)}`, 'eval-result');
+      const evalOutput = await handleLargeResponse(`Result:\n${formatValue(response.result)}`, 'browser-eval-result');
       return {
         content: [{
           type: 'text',
@@ -2152,24 +2101,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    if (name === 'DefineVariable') {
-      const { notebook, name: varName, expression, inputs, timeout_ms = DEFAULT_TIMEOUT } = args;
+    if (name === 'RuntimeEval') {
+      const { notebook, body, name: varName, timeout_ms = 10000 } = args;
 
-      if (!varName) {
+      if (!body) {
         return {
-          content: [{ type: 'text', text: 'Error: name is required' }],
+          content: [{ type: 'text', text: 'Error: body is required' }],
           isError: true
         };
       }
 
-      if (!expression) {
-        return {
-          content: [{ type: 'text', text: 'Error: expression is required' }],
-          isError: true
-        };
-      }
+      // Generate a random _tmp_ name if not provided; browser will auto-delete _tmp_* variables after resolution
+      const actualName = varName || `_tmp_${Math.random().toString(36).slice(2, 10)}`;
 
-      const response = await requestDefineVariable(varName, inputs, expression, timeout_ms, notebook);
+      const response = await requestRuntimeEval(actualName, body, timeout_ms, notebook);
 
       if (!response.success) {
         return {
@@ -2178,23 +2123,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      const output = [`Defined: ${varName}`];
-      output.push(`Expression: ${expression}`);
-
-      if (response.inputs && response.inputs.length > 0) {
-        output.push(`Dependencies: ${response.inputs.join(', ')}`);
-      } else {
-        output.push(`Dependencies: (none)`);
-      }
-
-      output.push(`State: ${response.state}`);
-
       if (response.state === 'fulfilled') {
-        // Return image content block for Canvas/SVG values
         const value = response.value;
+        const output = [];
+
+        // Add persistence info if named
+        if (varName) {
+          output.push(`Stored as: ${varName}`);
+        }
+
+        // Return image content block for Canvas/SVG values
         if (value?.__type === 'Canvas' && value.data) {
-          output.push('');
-          output.push(`Value:\nCanvas (${value.width}x${value.height})`);
+          output.push(`Canvas (${value.width}x${value.height})`);
           return {
             content: [
               { type: 'text', text: output.join('\n') },
@@ -2204,8 +2144,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         if (value?.__type === 'SVG' && value.data) {
-          output.push('');
-          output.push(`Value:\nSVG (${value.width}x${value.height})`);
+          output.push(`SVG (${value.width}x${value.height})`);
           return {
             content: [
               { type: 'text', text: output.join('\n') },
@@ -2214,81 +2153,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        output.push('');
-        output.push('Value:');
-        output.push(formatValue(response.value));
+        // Format the value
+        const formatted = formatValue(response.value);
+        if (varName) {
+          output.push('');
+          output.push(formatted);
+          const result = await handleLargeResponse(output.join('\n'), `runtime-eval-${actualName}`);
+          return { content: [{ type: 'text', text: result }] };
+        } else {
+          const result = await handleLargeResponse(formatted, 'runtime-eval-result');
+          return { content: [{ type: 'text', text: result }] };
+        }
       } else if (response.state === 'rejected') {
-        output.push(`Error: ${response.error}`);
+        const output = [`Error: ${response.error}`];
         if (response.stack) {
           output.push(`Stack: ${response.stack.split('\n').slice(0, 3).join('\n  ')}`);
         }
+        return {
+          content: [{ type: 'text', text: output.join('\n') }],
+          isError: true
+        };
       } else if (response.state === 'pending') {
-        output.push('(Value is still computing)');
-      }
-
-      const defineOutput = await handleLargeResponse(output.join('\n'), `define-${varName}`);
-      return {
-        content: [{
-          type: 'text',
-          text: defineOutput
-        }]
-      };
-    }
-
-    if (name === 'DeleteVariable') {
-      const { notebook, name: varName, timeout_ms = DEFAULT_TIMEOUT } = args;
-
-      if (!varName) {
         return {
-          content: [{ type: 'text', text: 'Error: name is required' }],
+          content: [{ type: 'text', text: 'Timeout: expression did not resolve within the specified time' }],
           isError: true
         };
       }
-
-      const response = await requestDeleteVariable(varName, timeout_ms, notebook);
-
-      if (!response.success) {
-        return {
-          content: [{ type: 'text', text: `Error: ${response.error}` }],
-          isError: true
-        };
-      }
-
-      return {
-        content: [{
-          type: 'text',
-          text: `Deleted injected variable: ${varName}`
-        }]
-      };
-    }
-
-    if (name === 'ListInjectedVariables') {
-      const { notebook, timeout_ms = DEFAULT_TIMEOUT } = args || {};
-
-      const response = await requestListInjectedVariables(timeout_ms, notebook);
-
-      if (!response.success) {
-        return {
-          content: [{ type: 'text', text: `Error: ${response.error}` }],
-          isError: true
-        };
-      }
-
-      if (response.variables.length === 0) {
-        return {
-          content: [{
-            type: 'text',
-            text: 'No injected variables. Use DefineVariable to inject ephemeral variables into the runtime.'
-          }]
-        };
-      }
-
-      return {
-        content: [{
-          type: 'text',
-          text: `Injected variables (${response.variables.length}):\n\n- ${response.variables.join('\n- ')}`
-        }]
-      };
     }
 
     throw new Error(`Unknown tool: ${name}`);

@@ -1,14 +1,15 @@
 /**
- * Eval request handler
+ * BrowserEval request handler - execute JavaScript in browser context (outside Observable runtime)
  */
 
 import { serializeValueAsync } from "../utils/serialize.js";
 
 /**
- * Handle Eval request - execute arbitrary JavaScript code and return the result
- * Automatically captures Canvas/SVG elements as images
+ * Handle BrowserEval request - execute arbitrary JavaScript code in the browser context.
+ * Has access to the DOM but NOT the Observable runtime variables.
+ * Automatically captures Canvas/SVG elements as images.
  */
-export async function handleEvalRequest(client, message) {
+export async function handleBrowserEvalRequest(client, message) {
   const { code } = message;
 
   try {
@@ -28,14 +29,14 @@ export async function handleEvalRequest(client, message) {
     const result = await fn();
 
     client.send({
-      type: "eval_response",
+      type: "browser_eval_response",
       requestId: message.requestId,
       success: true,
       result: await serializeValueAsync(result),
     });
   } catch (error) {
     client.send({
-      type: "eval_response",
+      type: "browser_eval_response",
       requestId: message.requestId,
       success: true, // Request succeeded, but code threw an error
       error: error.message,

@@ -9,8 +9,8 @@ import { handleGetValueRequest, handleGetValuesRequest, handleListValuesRequest,
 import { handleSetInputRequest } from "./handlers/inputs.js";
 import { handleGetElementContentRequest } from "./handlers/elements.js";
 import { handleGetDependencyGraphRequest } from "./handlers/graph.js";
-import { handleEvalRequest } from "./handlers/eval.js";
-import { handleDefineVariableRequest, handleDeleteVariableRequest, handleListInjectedVariablesRequest } from "./handlers/variables.js";
+import { handleBrowserEvalRequest } from "./handlers/eval.js";
+import { handleRuntimeEvalRequest } from "./handlers/variables.js";
 import { handleMouseClickRequest, handleMouseDragRequest, handleMouseWheelRequest, handleMouseHoverRequest } from "./handlers/mouse.js";
 import { handleSendKeysRequest } from "./handlers/keyboard.js";
 import { logEvent, logResponse, initEventLog } from "./ui/event-log.js";
@@ -258,23 +258,8 @@ export class DebugClient {
       return;
     }
 
-    if (message.type === "Eval") {
-      handleEvalRequest(this, message);
-      return;
-    }
-
-    if (message.type === "DefineVariable") {
-      handleDefineVariableRequest(this, message);
-      return;
-    }
-
-    if (message.type === "DeleteVariable") {
-      handleDeleteVariableRequest(this, message);
-      return;
-    }
-
-    if (message.type === "ListInjectedVariables") {
-      handleListInjectedVariablesRequest(this, message);
+    if (message.type === "BrowserEval") {
+      handleBrowserEvalRequest(this, message);
       return;
     }
 
@@ -300,6 +285,11 @@ export class DebugClient {
 
     if (message.type === "SendKeys") {
       handleSendKeysRequest(this, message);
+      return;
+    }
+
+    if (message.type === "RuntimeEval") {
+      handleRuntimeEvalRequest(this, message);
       return;
     }
   }
