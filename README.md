@@ -2,7 +2,7 @@
 
 > MCP server for debugging [Observable Notebook Kit](https://github.com/observablehq/notebook-kit) notebooks.
 
-Enables AI assistants to inspect values, view errors, and capture canvas output from notebooks running in a web browser. For a fully working example, see [./example](./example). This isn't yet published to NPM, so you'll need to install from GitHub, as I'm still trying kicking the tires and seeing how I feel about it.
+Enables AI assistants to inspect values, view errors, and capture canvas output from notebooks running in a web browser. For a fully working example, see [./example](./example).
 
 ## Why?
 
@@ -52,6 +52,8 @@ Add to your `.mcp.json`:
 }
 ```
 
+Note that you might need an absolute path to the mcp-notebook-kit-debug bin, and you might be using opencode or some other tool, so this step could vary a bit.
+
 ### 5. Go!
 
 You can now use an agent like Claude Code to poke and prod at notebooks running in a web browser, inspecting values and even capturing canvas output as images.
@@ -82,6 +84,7 @@ These tools interact with the browser/DOM context, outside the Observable runtim
 | `GetElementContent`       | Get content from a DOM element by CSS selector; captures canvas/SVG as images |
 | `MouseClick`              | Simulate a mouse click at a position or on an element                       |
 | `MouseDrag`               | Simulate a mouse drag from start to end position                            |
+| `MouseHover`              | Simulate mouse hover at a position, triggering hover states and tooltips    |
 | `MouseWheel`              | Simulate a mouse wheel scroll at a position                                 |
 | `SendKeys`                | Simulate keyboard input to an element                                       |
 
@@ -92,9 +95,10 @@ These tools manage notebook connections and debug sessions.
 | Tool                      | Description                                                                 |
 | ------------------------- | --------------------------------------------------------------------------- |
 | `ListNotebooks`           | List all connected notebooks (use when multiple notebooks are open)         |
+| `FocusNotebook`           | Set a default notebook for subsequent commands (when multiple are connected) |
 | `Refresh`                 | Refresh the page and wait for notebook initialization                       |
 | `Navigate`                | Navigate a notebook to a different URL (e.g., switch from notebook-a to notebook-b) |
-| `GetLogs`                 | View console logs from the current session                                  |
+| `GetConsoleMessages`      | View console logs from the current session                                  |
 | `GetErrors`               | Get all errors (DOM-reported and values in rejected state)                  |
 
 ### Multi-Notebook Support
@@ -140,7 +144,7 @@ Navigate({ url: "/some-page.html", wait_for_completion: false })
 ```
 
 **Behavior:**
-- **No notebooks connected**: Opens the URL in your OS default browser (using `open` on macOS, `start` on Windows, `xdg-open` on Linux)
+- **No notebooks connected**: Opens the URL in your OS default browser
 - **One notebook connected**: Navigates that notebook's browser window to the new URL
 - **Multiple notebooks connected**: 
   - Navigates the focused notebook (if you've used `FocusNotebook`)
@@ -214,6 +218,7 @@ Simulate mouse events for testing interactive visualizations:
 
 - **`MouseClick`**: Click at coordinates or on an element (supports left/middle/right buttons)
 - **`MouseDrag`**: Drag from start to end position with configurable duration
+- **`MouseHover`**: Hover at a position, dispatching mouseenter/mouseover/mousemove events
 - **`MouseWheel`**: Scroll at a position with deltaX/deltaY
 
 All mouse tools accept an optional `selector` parameter to target a specific element, with coordinates relative to that element.
@@ -243,7 +248,7 @@ SendKeys({ selector: "#my-input", keys: "typed text{Enter}" })
 SendKeys({ keys: "abc", modifiers: { shiftKey: true } })  // Types "ABC"
 ```
 
-Supported special keys: `{Enter}`, `{Tab}`, `{Escape}`, `{Backspace}`, `{Delete}`, `{Space}`, `{ArrowUp}`, `{ArrowDown}`, `{ArrowLeft}`, `{ArrowRight}`, `{Home}`, `{End}`, `{PageUp}`, `{PageDown}`, `{F1}`-`{F12}`.
+Supported special keys: `{Enter}`, `{Tab}`, `{Escape}`, `{Esc}`, `{Backspace}`, `{Delete}`, `{Insert}`, `{Space}`, `{ArrowUp}`, `{ArrowDown}`, `{ArrowLeft}`, `{ArrowRight}`, `{Home}`, `{End}`, `{PageUp}`, `{PageDown}`, `{F1}`-`{F12}`.
 
 ## License
 
