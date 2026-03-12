@@ -716,6 +716,20 @@ function handleBrowserMessage(message, ws) {
       });
       break;
 
+    case 'vite_error':
+      session.errors.push({
+        timestamp,
+        message: data.message,
+        stack: data.stack || null,
+        frame: data.frame || null,
+        loc: data.loc || null,
+        plugin: data.plugin || null,
+        file: data.file || data.id || null,
+        source: 'vite-build'
+      });
+      console.error(`[Server] Vite build error: ${data.message}`);
+      break;
+
     case 'binary':
       session.binary.push({
         timestamp,
@@ -1039,10 +1053,23 @@ function formatSessionOutput(session, filter, maxChars = 2000) {
     output.push('=== ERRORS ===');
     session.errors.forEach(error => {
       const time = error.timestamp ? new Date(error.timestamp).toISOString().split('T')[1].slice(0, -1) : '??:??:??';
-      output.push(`[${time}] ERROR: ${error.message}`);
+      const sourceTag = error.source ? ` [${error.source}]` : '';
+      output.push(`[${time}] ERROR${sourceTag}: ${error.message}`);
 
       if (error.cellId) {
         output.push(`  Cell: ${error.cellId}`);
+      }
+
+      if (error.file) {
+        output.push(`  File: ${error.file}`);
+      }
+
+      if (error.loc) {
+        output.push(`  Location: line ${error.loc.line}, column ${error.loc.column}`);
+      }
+
+      if (error.frame) {
+        output.push(`  Code:\n${error.frame.split('\n').map(l => '    ' + l).join('\n')}`);
       }
 
       if (error.stack) {
@@ -1437,7 +1464,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'GetErrors',
-        description: 'Get runtime errors from the Observable runtime. Returns values that are in a rejected state (failed to compute). For console.error messages, use GetConsoleMessages with channel="error".',
+        description: 'Get errors from the notebook. Returns both Vite build/parse errors (e.g. syntax errors that prevent the page from loading) and Observable runtime errors (values in a rejected state). If the page fails to load due to a syntax error, call this first — it will surface the Vite error even without a connected runtime. For console.error messages, use GetConsoleMessages with channel="error".',
         inputSchema: {
           type: 'object',
           properties: {
@@ -2154,43 +2181,75 @@ async function handleToolExecution(name, args) {
       };
     }
 
-    if (name === 'GetErrors') {
-      const { notebook, verbose = false, timeout_ms = DEFAULT_TIMEOUT } = args || {};
+     if (name === 'GetErrors') {
+       const { notebook, verbose = false, timeout_ms = DEFAULT_TIMEOUT } = args || {};
 
-      const response = await requestErrors(verbose, timeout_ms, notebook);
+       const outputParts = [];
 
-      if (!response.success) {
-        return {
-          content: [{ type: 'text', text: `Error: ${response.error}` }],
-          isError: true
-        };
-      }
+       // Check for Vite build errors stored in the current session.
+       // These are captured even when the Observable runtime fails to start.
+       const viteErrors = currentSessionId
+         ? (sessions.get(currentSessionId)?.errors || []).filter(e => e.source === 'vite-build')
+         : [];
 
-      if (response.errors.length === 0) {
-        return {
-          content: [{
-            type: 'text',
-            text: 'No errors found in notebook.'
-          }]
-        };
-      }
+       if (viteErrors.length > 0) {
+         const viteSection = viteErrors.map(e => {
+           const lines = [`[vite-build] ${e.message}`];
+           if (e.file) lines.push(`  File: ${e.file}`);
+           if (e.loc) lines.push(`  Location: line ${e.loc.line}, column ${e.loc.column}`);
+           if (e.frame) lines.push(`  Code:\n${e.frame.split('\n').map(l => '    ' + l).join('\n')}`);
+           if (verbose && e.stack) lines.push(`  Stack:\n${e.stack.split('\n').slice(0, 6).map(l => '    ' + l).join('\n')}`);
+           return lines.join('\n');
+         }).join('\n\n---\n\n');
+         outputParts.push(`=== VITE BUILD ERROR${viteErrors.length > 1 ? 'S' : ''} ===\n\n${viteSection}`);
+       }
 
-      const errorList = response.errors.map(e => {
-        let msg = `Value: ${e.name}\nError: ${e.error}`;
-        if (verbose && e.stack) {
-          const stackLines = e.stack.split('\n').slice(0, 6).join('\n');
-          msg += `\nStack:\n${stackLines}`;
-        }
-        return msg;
-      }).join('\n\n---\n\n');
+       // Also try to get runtime errors from the browser (may timeout if runtime didn't start).
+       let runtimeErrorText = null;
+       try {
+         const response = await requestErrors(verbose, timeout_ms, notebook);
+         if (response.success && response.errors.length > 0) {
+           const errorList = response.errors.map(e => {
+             let msg = `Value: ${e.name}\nError: ${e.error}`;
+             if (verbose && e.stack) {
+               const stackLines = e.stack.split('\n').slice(0, 6).join('\n');
+               msg += `\nStack:\n${stackLines}`;
+             }
+             return msg;
+           }).join('\n\n---\n\n');
+           runtimeErrorText = `=== RUNTIME ERRORS ===\n\nFound ${response.errors.length} error(s):\n\n${errorList}`;
+         } else if (!response.success && viteErrors.length === 0) {
+           // No vite errors either — surface the connection error
+           return {
+             content: [{ type: 'text', text: `Error: ${response.error}` }],
+             isError: true
+           };
+         }
+       } catch (err) {
+         // Runtime request timed out — likely because the runtime didn't start.
+         // If we have vite errors, that explains why; otherwise mention the timeout.
+         if (viteErrors.length === 0) {
+           outputParts.push(`Note: Runtime error request timed out (${err.message}). The Observable runtime may not have started.`);
+         }
+       }
 
-      return {
-        content: [{
-          type: 'text',
-          text: `Found ${response.errors.length} error(s):\n\n${errorList}`
-        }]
-      };
-    }
+       if (runtimeErrorText) {
+         outputParts.push(runtimeErrorText);
+       }
+
+       if (outputParts.length === 0) {
+         return {
+           content: [{ type: 'text', text: 'No errors found in notebook.' }]
+         };
+       }
+
+       return {
+         content: [{
+           type: 'text',
+           text: outputParts.join('\n\n')
+         }]
+       };
+     }
 
     if (name === 'SetInputValue') {
       const { notebook, name: valueName, value, timeout_ms = DEFAULT_TIMEOUT } = args;

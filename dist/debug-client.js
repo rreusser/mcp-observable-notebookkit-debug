@@ -3256,7 +3256,65 @@
         }
       }, SESSION_TIMEOUT);
       window.__debugClient = this;
+      this.setupViteErrorBridge();
       this.signalReady();
+    }
+    /**
+     * Forward Vite build/parse errors (e.g. syntax errors in notebook cells) to MCP.
+     *
+     * Two detection mechanisms:
+     *  1. Custom DOM event "vite:error" dispatched by runtime-expose.js (which has
+     *     access to import.meta.hot and therefore Vite's HMR error events).
+     *  2. MutationObserver watching for <vite-error-overlay> being added to the DOM
+     *     as a fallback in case the HMR bridge fires before the debug client connects.
+     */
+    setupViteErrorBridge() {
+      const sendViteError = (errorInfo) => {
+        this.send({
+          type: "vite_error",
+          data: errorInfo
+        });
+        this.endSession();
+      };
+      window.addEventListener("vite:error", (event) => {
+        sendViteError(event.detail);
+      });
+      if (Array.isArray(window.__viteErrors) && window.__viteErrors.length > 0) {
+        for (const err of window.__viteErrors) {
+          sendViteError(err);
+        }
+      }
+      if (window.__viteErrorPayload) {
+        const err = window.__viteErrorPayload;
+        sendViteError({
+          message: err?.message || String(err),
+          stack: err?.stack || null,
+          frame: err?.frame || null,
+          loc: err?.loc || null,
+          plugin: err?.plugin || null,
+          id: err?.id || null,
+          source: "vite-error-page"
+        });
+      }
+      const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          for (const node of mutation.addedNodes) {
+            if (node.tagName === "VITE-ERROR-OVERLAY") {
+              const shadowRoot = node.shadowRoot;
+              const messageEl = shadowRoot?.querySelector(".message-body");
+              const fileEl = shadowRoot?.querySelector(".file");
+              const frameEl = shadowRoot?.querySelector(".frame");
+              const message = messageEl?.textContent?.trim() || "Vite build error";
+              const file = fileEl?.textContent?.trim() || null;
+              const frame = frameEl?.textContent?.trim() || null;
+              sendViteError({ message, file, frame, source: "vite-error-overlay" });
+              observer.disconnect();
+              return;
+            }
+          }
+        }
+      });
+      observer.observe(document.documentElement, { childList: true, subtree: true });
     }
     signalReady() {
       const checkReady = () => {

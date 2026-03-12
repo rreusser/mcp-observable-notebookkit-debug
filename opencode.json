@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "notebook": {
+      "type": "local",
+      "command": ["mcp-notebookkit-debug"],
+      "enabled": true
+    }
+  }
+}

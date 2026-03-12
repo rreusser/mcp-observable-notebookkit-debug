@@ -246,6 +246,91 @@ export function debugNotebook() {
         }
         next();
       });
+
+      // Intercept Vite's error replacement page and inject the debug client.
+      //
+      // When Vite encounters a parse/transform error in a notebook cell, it replaces
+      // the entire page with a minimal error HTML (not our notebook HTML). The
+      // transformIndexHtml hook is never called for this page, so we must intercept
+      // the raw HTTP response and inject our scripts manually.
+      //
+      // Detection: Vite's error page always contains the literal string
+      //   `const error = {`
+      // in its inline <script> tag and has Content-Type: text/html.
+      server.middlewares.use((req, res, next) => {
+        const originalWrite = res.write.bind(res);
+        const originalEnd = res.end.bind(res);
+        let chunks = [];
+        let intercepting = false;
+
+        const onFirstChunk = (chunk) => {
+          // Vite's error page has no Content-Type header, so we detect by content.
+          // It always contains this distinctive pattern in its inline script.
+          const text = chunk.toString('utf-8');
+          if (!text.includes('const error = {')) return false;
+
+          intercepting = true;
+          return true;
+        };
+
+        res.write = function(chunk, encoding, callback) {
+          if (intercepting) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
+            return true;
+          }
+          if (typeof chunk === 'string' || Buffer.isBuffer(chunk)) {
+            if (onFirstChunk(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf-8'))) {
+              chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
+              return true;
+            }
+          }
+          return originalWrite(chunk, encoding, callback);
+        };
+
+        res.end = function(chunk, encoding, callback) {
+          if (chunk && !intercepting) {
+            const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf-8');
+            if (onFirstChunk(buf)) {
+              chunks.push(buf);
+            }
+          } else if (chunk && intercepting) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding || 'utf-8'));
+          }
+
+          if (intercepting) {
+            const portConfig = readPortConfig(projectRoot);
+            if (serverHost) portConfig.host = serverHost;
+            const debugClientCode = readClientFile(CLIENT_FILES.debugClient);
+            const configScript = `window.__NOTEBOOKKIT_DEBUG_CONFIG__ = ${JSON.stringify(portConfig)};`;
+
+            let html = Buffer.concat(chunks).toString('utf-8');
+
+            // Extract the error JSON directly from the already-generated HTML,
+            // then expose it as window.__viteErrorPayload so the debug client
+            // can read it without any async hooking.
+            const errorMatch = html.match(/const error = (\{.*?\})\s*\n/s);
+            const errorJson = errorMatch ? errorMatch[1] : 'null';
+            const bridgeScript = `window.__viteErrorPayload = ${errorJson};`;
+
+            const injection =
+              `<script>${configScript}</script>\n` +
+              `<script>${bridgeScript}</script>\n` +
+              `<script type="module">${debugClientCode}</script>\n`;
+
+            // Inject just before </head> (Vite's error page has a <head>)
+            html = html.replace('</head>', injection + '</head>');
+
+            const newBuf = Buffer.from(html, 'utf-8');
+            res.removeHeader('content-length');
+            res.setHeader('content-length', newBuf.length);
+            return originalEnd(newBuf, callback);
+          }
+
+          return originalEnd(chunk, encoding, callback);
+        };
+
+        next();
+      });
     },
 
     transformIndexHtml(html, ctx) {

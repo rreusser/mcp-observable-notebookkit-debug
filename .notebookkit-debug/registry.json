@@ -1,0 +1,13 @@
+{
+  "instances": {
+    "mcp-1773279954163-ozx9rn": {
+      "pid": 95885,
+      "ws": 9901,
+      "http": 9900,
+      "startedAt": 1773279954170,
+      "notebooks": [],
+      "isOwner": true
+    }
+  },
+  "owner": "mcp-1773279954163-ozx9rn"
+}
