@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "description": "MCP server for debugging Observable Notebook Kit notebooks",
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "src/vite/plugin.js",
   "bin": {
     "mcp-notebook-kit-debug": "bin/mcp-notebook-kit-debug.js"
