@@ -1,0 +1,14 @@
+# Build tooling
+build.js
+
+# Source maps
+dist/*.map
+
+# Example project
+example/
+
+# Runtime state
+.notebook-kit-debug/
+
+# Editor/tool config
+opencode.json
