@@ -145,8 +145,8 @@ export function handleMouseDragRequest(client, message) {
       // Update drag visualization
       dragViz.update(currentX, currentY);
 
-      // d3-zoom listens for mousemove on window (event.view)
-      window.dispatchEvent(
+      // dispatch mousemove on document so both d3-zoom and other listeners (e.g. unified-camera) receive it
+      document.dispatchEvent(
         new MouseEvent("mousemove", {
           ...eventInit,
           clientX: currentX,
@@ -160,8 +160,8 @@ export function handleMouseDragRequest(client, message) {
       if (t < 1) {
         requestAnimationFrame(animate);
       } else {
-        // d3-zoom listens for mouseup on window
-        window.dispatchEvent(
+        // dispatch mouseup on document so both d3-zoom and other listeners receive it
+        document.dispatchEvent(
           new MouseEvent("mouseup", {
             ...eventInit,
             clientX: endClientX,

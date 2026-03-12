@@ -2092,7 +2092,7 @@
         const currentX = startClientX + (endClientX - startClientX) * t;
         const currentY = startClientY + (endClientY - startClientY) * t;
         dragViz.update(currentX, currentY);
-        window.dispatchEvent(
+        document.dispatchEvent(
           new MouseEvent("mousemove", {
             ...eventInit,
             clientX: currentX,
@@ -2105,7 +2105,7 @@
         if (t < 1) {
           requestAnimationFrame(animate);
         } else {
-          window.dispatchEvent(
+          document.dispatchEvent(
             new MouseEvent("mouseup", {
               ...eventInit,
               clientX: endClientX,
@@ -3367,6 +3367,11 @@
       if (message.type === "Refresh") {
         sessionStorage.setItem(REFRESH_SESSION_KEY, message.sessionId);
         window.location.reload();
+        return;
+      }
+      if (message.type === "Navigate") {
+        sessionStorage.setItem(REFRESH_SESSION_KEY, message.sessionId);
+        window.location.href = message.url;
         return;
       }
       if (message.type) {

@@ -212,6 +212,12 @@ export class DebugClient {
       return;
     }
 
+    if (message.type === "Navigate") {
+      sessionStorage.setItem(REFRESH_SESSION_KEY, message.sessionId);
+      window.location.href = message.url;
+      return;
+    }
+
     // Log MCP events to the overlay
     if (message.type) {
       logEvent(message.type, message);

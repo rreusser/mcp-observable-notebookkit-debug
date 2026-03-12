@@ -93,6 +93,7 @@ These tools manage notebook connections and debug sessions.
 | ------------------------- | --------------------------------------------------------------------------- |
 | `ListNotebooks`           | List all connected notebooks (use when multiple notebooks are open)         |
 | `Refresh`                 | Refresh the page and wait for notebook initialization                       |
+| `Navigate`                | Navigate a notebook to a different URL (e.g., switch from notebook-a to notebook-b) |
 | `GetLogs`                 | View console logs from the current session                                  |
 | `GetErrors`               | Get all errors (DOM-reported and values in rejected state)                  |
 
@@ -116,6 +117,37 @@ notebook: "http://localhost:5173/"
 If multiple notebooks are connected and you don't specify which one, the tool will return an error listing the available notebooks.
 
 Use `ListNotebooks` to see all connected notebooks with their URLs and indices.
+
+### Navigating Between Notebooks
+
+The `Navigate` tool allows you to navigate an open notebook to a different URL, or open a URL in your default browser if no notebooks are connected:
+
+```javascript
+// If no notebooks are connected, opens URL in default browser
+Navigate({ url: "http://localhost:5173/index.html" })
+
+// Navigate to a different notebook (relative URL)
+Navigate({ url: "/second-notebook.html" })
+
+// Navigate using absolute URL
+Navigate({ url: "http://localhost:5173/second-notebook.html" })
+
+// Navigate a specific notebook (when multiple are open)
+Navigate({ url: "/second-notebook.html", notebook: "index" })
+
+// Skip waiting for page load (useful if target page doesn't have debug plugin)
+Navigate({ url: "/some-page.html", wait_for_completion: false })
+```
+
+**Behavior:**
+- **No notebooks connected**: Opens the URL in your OS default browser (using `open` on macOS, `start` on Windows, `xdg-open` on Linux)
+- **One notebook connected**: Navigates that notebook's browser window to the new URL
+- **Multiple notebooks connected**: 
+  - Navigates the focused notebook (if you've used `FocusNotebook`)
+  - Navigates the specified notebook (if `notebook` parameter provided)
+  - Returns an error listing all notebooks (if no focus is set and no notebook specified)
+
+The tool waits for the new page to load and initialize, similar to `Refresh`, and reports any errors that occur during initialization.
 
 ### Value States
 

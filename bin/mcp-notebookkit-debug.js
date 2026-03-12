@@ -910,6 +910,37 @@ function sendRefresh(notebook = null) {
 }
 
 /**
+ * Send navigate command to navigate a notebook to a new URL
+ */
+function sendNavigate(url, notebook = null) {
+  const sessionId = `session-${Date.now()}`;
+  const message = JSON.stringify({ type: 'Navigate', sessionId, url });
+
+  if (notebook) {
+    // Target specific notebook
+    const result = findClient(notebook);
+    if (result.error) {
+      throw new Error(result.error);
+    }
+    const { client, info } = result;
+    if (client.readyState === 1) {
+      console.error(`[Server] Navigating notebook ${getNotebookId(info.url)} to: ${url}`);
+      client.send(message);
+    }
+  } else {
+    // Navigate all notebooks
+    console.error(`[Server] Navigating all notebooks to: ${url} (new session: ${sessionId})`);
+    for (const [client, info] of clients) {
+      if (client.readyState === 1) {
+        client.send(message);
+      }
+    }
+  }
+
+  return sessionId;
+}
+
+/**
  * Fetch session data
  */
 async function fetchSession(sessionId) {
@@ -1275,6 +1306,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               default: COMPLETION_TIMEOUT
             }
           }
+        }
+      },
+      {
+        name: 'Navigate',
+        description: 'Navigate a notebook to a different URL, or open a URL in the default browser if no notebooks are connected. If a notebook is connected, navigates that browser window to the new URL. If no notebooks are connected, opens the URL in the OS default browser. Useful for switching between notebooks (e.g., from localhost:5173/notebooks/notebook-a to localhost:5173/notebooks/notebook-b) or opening a notebook for the first time.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            url: {
+              type: 'string',
+              description: 'The URL to navigate to (can be relative like "/notebooks/notebook-b" or absolute like "http://localhost:5173/notebooks/notebook-b")'
+            },
+            notebook: notebookParam,
+            wait_for_completion: {
+              type: 'boolean',
+              description: 'Wait for session_end signal (recommended when navigating existing notebook)',
+              default: true
+            },
+            timeout_ms: {
+              type: 'number',
+              description: 'Maximum time to wait in milliseconds',
+              default: COMPLETION_TIMEOUT
+            }
+          },
+          required: ['url']
         }
       },
       {
@@ -1847,6 +1903,87 @@ async function handleToolExecution(name, args) {
 
       output.push(`Console messages: ${logCount} (use GetConsoleMessages to view)`);
       output.push(`(Use GetErrors for runtime rejected values)`);
+
+      return {
+        content: [{
+          type: 'text',
+          text: output.join('\n')
+        }]
+      };
+    }
+
+    if (name === 'Navigate') {
+      const { url, notebook, wait_for_completion, timeout_ms } = args || {};
+
+      if (!url) {
+        return {
+          content: [{ type: 'text', text: 'Error: url is required' }],
+          isError: true
+        };
+      }
+
+      // If no notebooks are connected, open the URL in the OS default browser
+      if (clients.size === 0) {
+        try {
+          const open = (await import('open')).default;
+          await open(url);
+
+          return {
+            content: [{
+              type: 'text',
+              text: `No notebooks connected. Opened URL in default browser:\n${url}\n\nOnce the page loads with the debug plugin enabled, it will connect automatically.`
+            }]
+          };
+        } catch (err) {
+          return {
+            content: [{
+              type: 'text',
+              text: `Error opening URL in browser: ${err.message}\n\nNo notebooks are connected. Please open the URL manually:\n${url}`
+            }],
+            isError: true
+          };
+        }
+      }
+
+      const waitForSignal = wait_for_completion !== false;
+      const timeout = timeout_ms || (waitForSignal ? COMPLETION_TIMEOUT : 5000);
+
+      const sessionId = sendNavigate(url, notebook);
+
+      if (!waitForSignal) {
+        return {
+          content: [{
+            type: 'text',
+            text: `Navigation command sent to: ${url}\nSession ID: ${sessionId}\n\nNot waiting for completion (wait_for_completion=false).`
+          }]
+        };
+      }
+
+      const result = await waitForCompletion(sessionId, timeout);
+
+      const session = result.session;
+      const uncaughtCount = session?.errors?.length || 0;
+      const logCount = session?.logs?.length || 0;
+
+      const statusText = result.completed
+        ? `Navigated to ${url} in ${result.duration}ms`
+        : `Navigation timed out after ${result.duration}ms\n\nThis usually means:\n- The target page doesn't have the debug plugin enabled\n- The URL is invalid or the page failed to load\n- The page took longer than ${timeout}ms to initialize\n\nTry setting wait_for_completion=false if you just want to trigger navigation.`;
+
+      const output = [statusText];
+
+      if (result.completed) {
+        if (uncaughtCount > 0) {
+          output.push(`\nUncaught exceptions: ${uncaughtCount}`);
+          session.errors.forEach(error => {
+            output.push(`  - ${error.message}${error.cellId ? ` (cell: ${error.cellId})` : ''}`);
+          });
+        } else {
+          output.push('\nNo uncaught exceptions');
+        }
+
+        output.push(`Console messages: ${logCount} (use GetConsoleMessages to view)`);
+        output.push(`(Use GetErrors for runtime rejected values)`);
+      }
 
       return {
         content: [{
