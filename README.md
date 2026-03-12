@@ -1,4 +1,4 @@
-# mcp-observable-notebookkit-debug
+# mcp-observable-notebook-kit-debug
 
 > MCP server for debugging [Observable Notebook Kit](https://github.com/observablehq/notebook-kit) notebooks.
 
@@ -13,7 +13,7 @@ The [Observable Desktop](https://observablehq.com/notebook-kit/desktop) is reall
 ### 1. Install the package
 
 ```bash
-npm install @rreusser/mcp-observable-notebookkit-debug
+npm install @rreusser/mcp-observable-notebook-kit-debug
 ```
 
 ### 2. Add the Vite plugin
@@ -23,7 +23,7 @@ In your `vite.config.js`:
 ```js
 import { defineConfig } from "vite";
 import { observable, config } from "@observablehq/notebook-kit/vite";
-import { debugNotebook } from "@rreusser/mcp-observable-notebookkit-debug";
+import { debugNotebook } from "@rreusser/mcp-observable-notebook-kit-debug";
 
 export default defineConfig({
   ...config(),
@@ -45,7 +45,7 @@ Add to your `.mcp.json`:
 {
   "mcpServers": {
     "Notebook": {
-      "command": "mcp-notebookkit-debug",
+      "command": "mcp-notebook-kit-debug",
       "args": []
     }
   }

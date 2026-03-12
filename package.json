@@ -1,11 +1,11 @@
 {
-  "name": "@rreusser/mcp-observable-notebookkit-debug",
+  "name": "@rreusser/mcp-observable-notebook-kit-debug",
   "version": "0.0.0",
   "type": "module",
   "description": "MCP server for debugging Observable Notebook Kit notebooks",
   "main": "src/vite/plugin.js",
   "bin": {
-    "mcp-notebookkit-debug": "./bin/mcp-notebookkit-debug.js"
+    "mcp-notebook-kit-debug": "./bin/mcp-notebook-kit-debug.js"
   },
   "scripts": {
     "build": "node build.js",

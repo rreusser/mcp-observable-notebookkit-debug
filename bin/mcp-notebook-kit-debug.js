@@ -36,7 +36,7 @@ let WS_PORT = BASE_WS_PORT;
 const INSTANCE_ID = `mcp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 // Debug directory for this project
-const DEBUG_DIR = join(process.cwd(), '.notebookkit-debug');
+const DEBUG_DIR = join(process.cwd(), '.notebook-kit-debug');
 const REGISTRY_FILE = join(DEBUG_DIR, 'registry.json');
 const RESPONSES_DIR = join(DEBUG_DIR, 'responses');
 

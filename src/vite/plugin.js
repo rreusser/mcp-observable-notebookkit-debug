@@ -51,7 +51,7 @@ function isProcessAlive(pid) {
  * Read the instance registry, returning live instances
  */
 function readRegistry(projectRoot) {
-  const registryFile = join(projectRoot, ".notebookkit-debug", "registry.json");
+  const registryFile = join(projectRoot, ".notebook-kit-debug", "registry.json");
   try {
     if (existsSync(registryFile)) {
       const registry = JSON.parse(readFileSync(registryFile, "utf-8"));
@@ -107,7 +107,7 @@ function readPortConfig(projectRoot) {
   }
 
   // Fall back to legacy port file
-  const portFile = join(projectRoot, ".notebookkit-debug", "port");
+  const portFile = join(projectRoot, ".notebook-kit-debug", "port");
   try {
     if (existsSync(portFile)) {
       const config = JSON.parse(readFileSync(portFile, "utf-8"));

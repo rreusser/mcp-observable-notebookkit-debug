@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "Notebook": {
-      "command": "../bin/mcp-notebookkit-debug.js",
+      "command": "../bin/mcp-notebook-kit-debug.js",
       "args": []
     }
   }
