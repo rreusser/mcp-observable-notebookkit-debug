@@ -3,7 +3,7 @@
   "mcp": {
     "notebook": {
       "type": "local",
-      "command": ["mcp-notebook-kit-debug"],
+      "command": ["../bin/mcp-notebook-kit-debug.js"],
       "enabled": true
     }
   }

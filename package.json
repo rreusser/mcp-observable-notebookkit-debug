@@ -25,5 +25,9 @@
   },
   "peerDependencies": {
     "@observablehq/notebook-kit": "^1.5.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rreusser/mcp-observable-notebookkit-debug.git"
   }
 }
