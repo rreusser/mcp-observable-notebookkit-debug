@@ -13,7 +13,7 @@ import { handleBrowserEvalRequest } from "./handlers/eval.js";
 import { handleRuntimeEvalRequest } from "./handlers/variables.js";
 import { handleMouseClickRequest, handleMouseDragRequest, handleMouseWheelRequest, handleMouseHoverRequest } from "./handlers/mouse.js";
 import { handleSendKeysRequest } from "./handlers/keyboard.js";
-import { logEvent, logResponse, initEventLog } from "./ui/event-log.js";
+import { logEvent, logResponse, initEventLog, setConnectionStatus, getEnabled, setEnabledChangeHandler } from "./ui/event-log.js";
 
 const RECONNECT_INTERVAL = 2000;
 const SESSION_TIMEOUT = 5000;
@@ -53,19 +53,25 @@ export class DebugClient {
       }
     });
 
-    this.connect();
+    // Show the connection indicator immediately (dim/disconnected state)
+    initEventLog();
+    setConnectionStatus(false);
+
+    // Wire the on/off switch in the event-log header to connect/disconnect.
+    setEnabledChangeHandler((isEnabled) => {
+      if (isEnabled) {
+        this.connectAttempts = 0;
+        this.connect();
+      } else {
+        this.disconnect();
+      }
+    });
+
+    if (getEnabled()) {
+      this.connect();
+    }
     this.originalConsole = patchConsole(this.send.bind(this));
     this.errorWatching = setupErrorWatching(this.send.bind(this));
-
-    this.send({
-      type: "session_start",
-      sessionId: this.sessionId,
-      timestamp: Date.now(),
-      data: {
-        url: window.location.href,
-        userAgent: navigator.userAgent,
-      },
-    });
 
     setTimeout(() => {
       if (!this.sessionEnded) {
@@ -187,7 +193,29 @@ export class DebugClient {
     return path;
   }
 
+  disconnect() {
+    if (this.ws) {
+      try {
+        this.ws.onclose = null;  // Prevent reconnect loop
+        this.ws.onerror = null;
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.close();
+      } catch (e) {}
+      this.ws = null;
+    }
+    this.connecting = false;
+    this.connected = false;
+    this.connectAttempts = 0;
+    setConnectionStatus(false);
+  }
+
   connect() {
+    // Bail if the user has flipped the connection off via the UI switch.
+    if (!getEnabled()) {
+      return;
+    }
+
     // Connect through Vite's WebSocket proxy (same origin as the page)
     // Include notebook path for multi-instance routing
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -242,8 +270,20 @@ export class DebugClient {
         this.connectAttempts = 0; // Reset on successful connection
         console.log("[DebugClient] Connected to MCP server at", wsUrl);
 
-        // Show the event log overlay as soon as we connect
-        initEventLog();
+        setConnectionStatus(true);
+
+        // Identify this client to the server. Sent on every connect (not just
+        // the first) so the server knows the URL after reconnects and after
+        // the user toggles the connection switch off/on.
+        this.ws.send(JSON.stringify({
+          type: "session_start",
+          sessionId: this.sessionId,
+          timestamp: Date.now(),
+          data: {
+            url: window.location.href,
+            userAgent: navigator.userAgent,
+          },
+        }));
 
         while (this.messageQueue.length > 0) {
           const msg = this.messageQueue.shift();
@@ -256,6 +296,7 @@ export class DebugClient {
         const wasConnected = this.connected;
         this.connecting = false;
         this.connected = false;
+        setConnectionStatus(false);
         // Only auto-reconnect if we were previously connected (not from a failed connection attempt)
         if (wasConnected) {
           console.log("[DebugClient] Disconnected from MCP server (code:", event.code, "reason:", event.reason || "none", "), reconnecting in", RECONNECT_INTERVAL, "ms");

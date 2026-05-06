@@ -2415,6 +2415,7 @@
   var TOAST_DURATION = 2500;
   var MAX_EVENTS = 50;
   var EXPANDED_STORAGE_KEY = "__mcp_event_log_expanded";
+  var ENABLED_STORAGE_KEY = "__mcp_connection_enabled";
   var MOUSE_EVENTS = ["MouseClick", "MouseHover", "MouseDrag", "MouseWheel"];
   var ELEMENT_EVENTS = ["GetElementContent"];
   var container = null;
@@ -2422,7 +2423,11 @@
   var historyPanel = null;
   var detailPanel = null;
   var toggleButton = null;
+  var connectionSwitch = null;
   var expanded = false;
+  var connected = false;
+  var enabled = true;
+  var enabledChangeHandler = null;
   var events = [];
   var eventsByRequestId = /* @__PURE__ */ new Map();
   var selectedEventIndex = null;
@@ -2441,6 +2446,11 @@
   box-sizing: border-box;
 }
 
+/*
+ * Toggle button signals two independent things:
+ *   - color  \u2192 enabled intent  (green = on, gray = off)
+ *   - opacity \u2192 live WebSocket (full = connected, dim = not connected)
+ */
 .mcp-event-log-toggle {
   pointer-events: auto;
   position: absolute;
@@ -2449,27 +2459,40 @@
   width: 28px;
   height: 28px;
   border-radius: 6px;
-  background: rgba(30, 30, 30, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.6);
+  background: rgba(30, 30, 30, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba(255, 255, 255, 0.55);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: opacity 0.2s ease, color 0.2s ease, border-color 0.2s ease, background 0.15s ease;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  opacity: 0.45;
 }
 
 .mcp-event-log-toggle:hover {
+  opacity: 1;
   background: rgba(50, 50, 50, 0.95);
-  color: rgba(255, 255, 255, 0.9);
-  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.mcp-event-log-toggle.enabled {
+  color: #6ee7b7;
+  border-color: rgba(110, 231, 183, 0.35);
+}
+
+.mcp-event-log-toggle.enabled:hover {
+  border-color: rgba(110, 231, 183, 0.6);
+}
+
+.mcp-event-log-toggle.connected {
+  opacity: 1;
 }
 
 .mcp-event-log-toggle.expanded {
   background: rgba(60, 60, 60, 0.95);
-  color: #6ee7b7;
+  opacity: 1;
 }
 
 .mcp-event-log-toasts {
@@ -2575,6 +2598,47 @@
   background: rgba(255, 255, 255, 0.1);
   color: rgba(255, 255, 255, 0.7);
 }
+
+.mcp-event-log-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mcp-connection-switch {
+  position: relative;
+  width: 26px;
+  height: 14px;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.mcp-connection-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.7);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.mcp-connection-switch.on {
+  background: rgba(110, 231, 183, 0.4);
+}
+
+.mcp-connection-switch.on::after {
+  transform: translateX(12px);
+  background: #6ee7b7;
+}
+
 
 .mcp-event-log-list {
   flex: 1;
@@ -3105,6 +3169,11 @@
       expanded = localStorage.getItem(EXPANDED_STORAGE_KEY) === "1";
     } catch (e) {
     }
+    try {
+      const stored = sessionStorage.getItem(ENABLED_STORAGE_KEY);
+      if (stored !== null) enabled = stored === "1";
+    } catch (e) {
+    }
     const styleEl2 = document.createElement("style");
     styleEl2.textContent = styles2;
     document.head.appendChild(styleEl2);
@@ -3131,15 +3200,28 @@
     historyPanel.className = "mcp-event-log-history";
     historyPanel.innerHTML = `
     <div class="mcp-event-log-header">
-      <span>MCP Events</span>
+      <div class="mcp-event-log-header-actions">
+        <button class="mcp-connection-switch" type="button" role="switch" aria-checked="false" title="Toggle MCP connection"></button>
+        <span>MCP Events</span>
+      </div>
       <button class="mcp-event-log-clear">Clear</button>
     </div>
     <div class="mcp-event-log-list"></div>
   `;
     container.appendChild(historyPanel);
+    connectionSwitch = historyPanel.querySelector(".mcp-connection-switch");
+    updateConnectionSwitch();
+    connectionSwitch.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setEnabled(!enabled);
+    });
     toggleButton = document.createElement("button");
     toggleButton.className = "mcp-event-log-toggle";
-    toggleButton.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`;
+    toggleButton.title = "MCP connection";
+    toggleButton.setAttribute("aria-label", "MCP connection");
+    toggleButton.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M7 8h10v4a5 5 0 0 1-10 0V8z"/><path d="M12 17v5"/></svg>`;
+    if (connected) toggleButton.classList.add("connected");
+    if (enabled) toggleButton.classList.add("enabled");
     toggleButton.addEventListener("click", toggleExpanded);
     container.appendChild(toggleButton);
     historyPanel.querySelector(".mcp-event-log-clear").addEventListener("click", (e) => {
@@ -3202,6 +3284,53 @@
   function getEventLog() {
     return { events, expanded, container, eventsByRequestId };
   }
+  function setConnectionStatus(isConnected) {
+    connected = !!isConnected;
+    if (toggleButton) {
+      toggleButton.classList.toggle("connected", connected);
+      const base = enabled ? connected ? "MCP connected" : "MCP disconnected" : "MCP connection disabled";
+      toggleButton.title = base;
+      toggleButton.setAttribute("aria-label", base);
+    }
+  }
+  function updateConnectionSwitch() {
+    if (connectionSwitch) {
+      connectionSwitch.classList.toggle("on", enabled);
+      connectionSwitch.setAttribute("aria-checked", enabled ? "true" : "false");
+      connectionSwitch.title = enabled ? "Disable MCP connection" : "Enable MCP connection";
+    }
+    if (toggleButton) {
+      toggleButton.classList.toggle("enabled", enabled);
+    }
+    setConnectionStatus(connected);
+  }
+  function setEnabled(value) {
+    const next = !!value;
+    if (next === enabled) return;
+    enabled = next;
+    try {
+      sessionStorage.setItem(ENABLED_STORAGE_KEY, enabled ? "1" : "0");
+    } catch (e) {
+    }
+    updateConnectionSwitch();
+    if (enabledChangeHandler) {
+      try {
+        enabledChangeHandler(enabled);
+      } catch (e) {
+      }
+    }
+  }
+  function getEnabled() {
+    try {
+      const stored = sessionStorage.getItem(ENABLED_STORAGE_KEY);
+      if (stored !== null) enabled = stored === "1";
+    } catch (e) {
+    }
+    return enabled;
+  }
+  function setEnabledChangeHandler(cb) {
+    enabledChangeHandler = cb;
+  }
   if (typeof window !== "undefined") {
     window.__mcpEventLog = { getEventLog, logResponse };
   }
@@ -3238,18 +3367,21 @@
           this.ws.close();
         }
       });
-      this.connect();
-      this.originalConsole = patchConsole(this.send.bind(this));
-      this.errorWatching = setupErrorWatching(this.send.bind(this));
-      this.send({
-        type: "session_start",
-        sessionId: this.sessionId,
-        timestamp: Date.now(),
-        data: {
-          url: window.location.href,
-          userAgent: navigator.userAgent
+      init2();
+      setConnectionStatus(false);
+      setEnabledChangeHandler((isEnabled) => {
+        if (isEnabled) {
+          this.connectAttempts = 0;
+          this.connect();
+        } else {
+          this.disconnect();
         }
       });
+      if (getEnabled()) {
+        this.connect();
+      }
+      this.originalConsole = patchConsole(this.send.bind(this));
+      this.errorWatching = setupErrorWatching(this.send.bind(this));
       setTimeout(() => {
         if (!this.sessionEnded) {
           this.endSession();
@@ -3343,7 +3475,27 @@
       path = path.replace(/\.html$/, "");
       return path;
     }
+    disconnect() {
+      if (this.ws) {
+        try {
+          this.ws.onclose = null;
+          this.ws.onerror = null;
+          this.ws.onopen = null;
+          this.ws.onmessage = null;
+          this.ws.close();
+        } catch (e) {
+        }
+        this.ws = null;
+      }
+      this.connecting = false;
+      this.connected = false;
+      this.connectAttempts = 0;
+      setConnectionStatus(false);
+    }
     connect() {
+      if (!getEnabled()) {
+        return;
+      }
       const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const notebookPath = encodeURIComponent(this.getNotebookPath());
       const wsUrl = `${wsProtocol}//${window.location.host}/__debug_ws/${notebookPath}`;
@@ -3388,7 +3540,16 @@
           this.connected = true;
           this.connectAttempts = 0;
           console.log("[DebugClient] Connected to MCP server at", wsUrl);
-          init2();
+          setConnectionStatus(true);
+          this.ws.send(JSON.stringify({
+            type: "session_start",
+            sessionId: this.sessionId,
+            timestamp: Date.now(),
+            data: {
+              url: window.location.href,
+              userAgent: navigator.userAgent
+            }
+          }));
           while (this.messageQueue.length > 0) {
             const msg = this.messageQueue.shift();
             this.ws.send(msg);
@@ -3399,6 +3560,7 @@
           const wasConnected = this.connected;
           this.connecting = false;
           this.connected = false;
+          setConnectionStatus(false);
           if (wasConnected) {
             console.log("[DebugClient] Disconnected from MCP server (code:", event.code, "reason:", event.reason || "none", "), reconnecting in", RECONNECT_INTERVAL, "ms");
             setTimeout(() => this.connect(), RECONNECT_INTERVAL);
